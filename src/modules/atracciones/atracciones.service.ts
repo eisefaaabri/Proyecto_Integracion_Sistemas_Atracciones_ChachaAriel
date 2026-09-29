@@ -114,6 +114,20 @@ export class AtraccionesService {
   }
 
   async create(createDto: CreateAtraccionDto) {
+    const existing = await this.atraccionRepository.findOne({
+      where: { name: createDto.name },
+    });
+
+    if (existing) {
+      throw new ConflictException({
+        type: 'https://api.booking-hub.com/errors/conflict',
+        title: 'Atracción duplicada',
+        status: 409,
+        detail: `Ya existe una atracción registrada con el nombre: ${createDto.name}`,
+        instance: `/api/v1/atracciones`,
+      });
+    }
+
     const atraccion = this.atraccionRepository.create({
       name: createDto.name,
       long_description: createDto.long_description,
@@ -190,6 +204,21 @@ export class AtraccionesService {
       });
     }
 
+    if (dto.name !== exists.name) {
+      const nameExists = await this.atraccionRepository.findOne({
+        where: { name: dto.name },
+      });
+      if (nameExists) {
+        throw new ConflictException({
+          type: 'https://api.booking-hub.com/errors/conflict',
+          title: 'Atracción duplicada',
+          status: 409,
+          detail: `Ya existe una atracción registrada con el nombre: ${dto.name}`,
+          instance: `/api/v1/atracciones/${id}`,
+        });
+      }
+    }
+
     await this.atraccionRepository.update(id, {
       name: dto.name,
       long_description: dto.long_description,
@@ -220,6 +249,21 @@ export class AtraccionesService {
         detail: `No se encontró una atracción con el ID: ${id}`,
         instance: `/api/v1/atracciones/${id}`,
       });
+    }
+
+    if (dto.name && dto.name !== atraccion.name) {
+      const nameExists = await this.atraccionRepository.findOne({
+        where: { name: dto.name },
+      });
+      if (nameExists) {
+        throw new ConflictException({
+          type: 'https://api.booking-hub.com/errors/conflict',
+          title: 'Atracción duplicada',
+          status: 409,
+          detail: `Ya existe una atracción registrada con el nombre: ${dto.name}`,
+          instance: `/api/v1/atracciones/${id}`,
+        });
+      }
     }
 
     const updateData: Partial<Atraccion> = {};
