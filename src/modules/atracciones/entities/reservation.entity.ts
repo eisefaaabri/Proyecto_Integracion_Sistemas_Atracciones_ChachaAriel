@@ -6,7 +6,9 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Check,
 } from 'typeorm';
+import { ColumnNumericTransformer } from '../../../common/transformers/column-numeric.transformer';
 import { Atraccion } from './atraccion.entity';
 
 export enum ReservationStatus {
@@ -16,6 +18,8 @@ export enum ReservationStatus {
 }
 
 @Entity('reservations')
+@Check('CHK_ticket_count', '"ticket_count" >= 1')
+@Check('CHK_total_price', '"total_price_total" >= 0')
 export class Reservation {
   @PrimaryGeneratedColumn('uuid')
   reservation_id: string;
@@ -49,10 +53,18 @@ export class Reservation {
   @Column({ type: 'varchar', length: 255, nullable: true })
   customer_email: string;
 
-  @Column({ type: 'jsonb', nullable: true })
-  total_price: { currency: string; total: number };
+  @Column({ type: 'varchar', length: 3, default: 'USD' })
+  total_price_currency: string;
 
-  @Column({ type: 'uuid' })
+  @Column('numeric', {
+    precision: 10,
+    scale: 2,
+    default: 0,
+    transformer: new ColumnNumericTransformer(),
+  })
+  total_price_total: number;
+
+  @Column({ type: 'uuid', unique: true })
   idempotency_key: string;
 
   @Column({ type: 'text', nullable: true })

@@ -5,7 +5,22 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  ManyToOne,
+  OneToMany,
+  ManyToMany,
+  JoinColumn,
+  JoinTable,
+  Unique,
+  Check,
 } from 'typeorm';
+import { ColumnNumericTransformer } from '../../../common/transformers/column-numeric.transformer';
+import { Operator } from './operator.entity';
+import { Category } from './category.entity';
+import { Badge } from './badge.entity';
+import { Language } from './language.entity';
+import { AtraccionLocation } from './atraccion-location.entity';
+import { AtraccionPhoto } from './atraccion-photo.entity';
+import { AtraccionInclude } from './atraccion-include.entity';
 
 export enum ProductType {
   SINGLE_TICKET = 'SINGLE_TICKET',
@@ -14,11 +29,15 @@ export enum ProductType {
 }
 
 @Entity('atracciones')
+@Unique('UQ_atraccion_name_operator', ['name', 'operator_id'])
+@Check('CHK_price_positive', '"price_total" > 0')
+@Check('CHK_rating_range', '"rating_score" IS NULL OR ("rating_score" >= 0 AND "rating_score" <= 5)')
+@Check('CHK_rating_count', '"rating_count" >= 0')
 export class Atraccion {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 255, unique: true })
+  @Column({ type: 'varchar', length: 255 })
   name: string;
 
   @Column({ type: 'text', nullable: true })
@@ -27,29 +46,34 @@ export class Atraccion {
   @Column({ type: 'varchar', length: 50, nullable: true })
   duration: string;
 
-  @Column({ type: 'jsonb', nullable: true })
-  price: { currency: string; total: number };
+  // ═══════════════════════════════════════════════════════════════════
+  //  Precio — 1FN: Atributos atómicos (antes era JSONB compuesto)
+  // ═══════════════════════════════════════════════════════════════════
 
-  @Column({ type: 'simple-array', nullable: true })
-  categories: string[];
+  @Column({ type: 'varchar', length: 3, default: 'USD' })
+  price_currency: string;
 
-  @Column({ type: 'simple-array', nullable: true })
-  badges: string[];
+  @Column('numeric', {
+    precision: 10,
+    scale: 2,
+    transformer: new ColumnNumericTransformer(),
+  })
+  price_total: number;
 
-  @Column({ type: 'jsonb', nullable: true })
-  locations: Array<{
-    address: string;
-    city: number;
-    country: string;
-    coordinates: { latitude: number; longitude: number };
-    type?: string;
-  }>;
+  // ═══════════════════════════════════════════════════════════════════
+  //  Operador — 3FN: FK elimina dependencia transitiva
+  // ═══════════════════════════════════════════════════════════════════
 
-  @Column({ type: 'jsonb', nullable: true })
-  photos: Array<{ url: string }>;
+  @ManyToOne(() => Operator, { eager: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'operator_id' })
+  operator: Operator;
 
-  @Column({ type: 'jsonb', nullable: true })
-  operator: { id: number; name: string };
+  @Column({ type: 'int' })
+  operator_id: number;
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Tipo de producto — Restricción de dominio (enum)
+  // ═══════════════════════════════════════════════════════════════════
 
   @Column({
     type: 'enum',
@@ -58,20 +82,75 @@ export class Atraccion {
   })
   product_type: ProductType;
 
-  @Column({ type: 'simple-array', nullable: true })
-  includes: string[];
-
-  @Column({ type: 'simple-array', nullable: true })
-  supported_languages: string[];
-
   @Column({ type: 'boolean', default: false })
   free_cancellation: boolean;
 
-  @Column({ type: 'jsonb', nullable: true })
-  ratings: { number_of_reviews: number; score: number };
+  // ═══════════════════════════════════════════════════════════════════
+  //  Ratings — 1FN: Atributos atómicos (antes era JSONB compuesto)
+  // ═══════════════════════════════════════════════════════════════════
 
-  @Column({ type: 'jsonb', nullable: true })
-  url: { web: string; app?: string };
+  @Column('numeric', {
+    precision: 3,
+    scale: 1,
+    nullable: true,
+    transformer: new ColumnNumericTransformer(),
+  })
+  rating_score: number;
+
+  @Column({ type: 'int', default: 0 })
+  rating_count: number;
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  URLs — 1FN: Atributos atómicos (antes era JSONB compuesto)
+  // ═══════════════════════════════════════════════════════════════════
+
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  url_web: string;
+
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  url_app: string;
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Relaciones 1:N — 1FN: Elimina grupos repetidos (JSONB arrays)
+  // ═══════════════════════════════════════════════════════════════════
+
+  @OneToMany(() => AtraccionLocation, (loc) => loc.atraccion, {
+    cascade: true,
+    eager: true,
+  })
+  locations: AtraccionLocation[];
+
+  @OneToMany(() => AtraccionPhoto, (p) => p.atraccion, {
+    cascade: true,
+    eager: true,
+  })
+  photos: AtraccionPhoto[];
+
+  @OneToMany(() => AtraccionInclude, (inc) => inc.atraccion, {
+    cascade: true,
+    eager: true,
+  })
+  includes: AtraccionInclude[];
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Relaciones N:M — 1FN: Elimina simple-array → tablas pivote
+  // ═══════════════════════════════════════════════════════════════════
+
+  @ManyToMany(() => Category, { cascade: true, eager: true })
+  @JoinTable({ name: 'atraccion_categories' })
+  categories: Category[];
+
+  @ManyToMany(() => Badge, { cascade: true, eager: true })
+  @JoinTable({ name: 'atraccion_badges' })
+  badges: Badge[];
+
+  @ManyToMany(() => Language, { cascade: true, eager: true })
+  @JoinTable({ name: 'atraccion_languages' })
+  supported_languages: Language[];
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  Auditoría y Soft Delete
+  // ═══════════════════════════════════════════════════════════════════
 
   @CreateDateColumn({ type: 'timestamp' })
   created_at: Date;
