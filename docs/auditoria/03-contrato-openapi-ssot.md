@@ -1,8 +1,11 @@
 # Informe 03 — Contrato OpenAPI, Fuente Unica de Verdad y Versionado
 
 **Objeto:** `contracts/atracciones-openapi.yaml` (872 lineas, 23 648 bytes) frente a la implementacion NestJS.
-**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04 sobre `a4b4657`
+**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04 sobre `a4b4657` · **Revision 3:** 2026-10-04 sobre `a39bfe7` + arbol sin commitear
 **Normativa:** OpenAPI Specification 3.0.3 · RFC 7807 (problem+json) · Semantic Versioning 2.0.0 · HTTP Semantics (RFC 9110)
+
+> **Resultado de la Revision 3: 0 hallazgos cerrados, 3 divergencias nuevas (M-24, M-25, M-26).**
+> El YAML **sigue sin modificarse**. Se implementa un filtro global de excepciones y un DTO de error publicado, lo que **centraliza** la forma de error pero **no resuelve** ninguno de los tres problemas del §4: el `Content-Type` sigue siendo `application/json`, hay **0 respuestas `application/problem+json`** en el documento generado, y el repositorio ahora tiene **dos modelos de error** —el `ProblemDetails` del YAML y el `ErrorDto` del codigo— sin que se declare cual manda. La afirmacion «Los errores siguen el estandar RFC 7807 (application/problem+json)» de `main.ts:52` **empeora**: ahora existe el mecanismo que la haria verdadera y no se completo. Ver §4.1.
 
 > **Resultado de la Revision 2: 0 hallazgos cerrados, 2 divergencias nuevas (D-12, D-13).**
 > El contrato YAML **no ha sido modificado** y sus tres defectos principales siguen intactos: las claves duplicadas de `/atracciones/{id}` (**C-05**, verificado de nuevo por parser), la paginacion `offset` frente a `page` (**D-02**) y la ausencia de `servers`. Lo que ha cambiado es el codigo, y en dos direcciones opuestas: el **versionado nativo** (positivo, ver §5.4) y la **eliminacion de `@ApiHeader('Idempotency-Key')`** en 10 endpoints, que introduce **D-12**. La divergencia D-01 (`security` en 0 de 14 operaciones) se ha reverificado sin cambios.
@@ -98,8 +101,8 @@ Tabla de conformance. «Verificacion» indica como se obtuvo la evidencia.
 | D-01 | `security: OAuth2Security` en 11 operaciones | **Cero** autenticacion o autorizacion; ningun guard de auth en el proyecto | `src/main.ts:11`; `atracciones.controller.ts` | **Empirica:** `POST /atracciones` devolvio **201** sin token; la doc generada tiene `security` en **0 de 14** operaciones |
 | D-02 | `GET /atracciones?limit=&offset=` | `PaginationQueryDto` expone `page` y `limit`; `offset` no existe | `atracciones-openapi.yaml:107-117` vs `common/dto/pagination-query.dto.ts` | por inspeccion |
 | D-03 | `PaginatedAtraccionResponse` | `findAll()` devuelve `{data, meta}` **sin `_links`**, y el DTO lo marca obligatorio | `common/dto/paginated-response.dto.ts:17` | **Empirica:** respuesta real sin la propiedad |
-| D-04 | Errores en `application/problem+json` | Respuestas en `application/json`; sin filtro global de excepciones | `src/main.ts` | **Empirica:** `Content-Type: application/json; charset=utf-8` |
-| D-05 | `ProblemDetails` con `type`/`title`/`status`/`detail`/`instance` | El `ValidationPipe` devuelve `{statusCode, message[], error}`: esquema distinto | `src/main.ts:17-26` | por inspeccion |
+| D-04 | Errores en `application/problem+json` | Respuestas en `application/json`. **R3:** ya existe filtro global, pero `response.json()` sigue fijando `application/json` | `http-exception.filter.ts:27` | **Empirica (R3):** `application/json; charset=utf-8` en 404, 400 y 500 |
+| D-05 | `ProblemDetails` con `type`/`title`/`status`/`detail`/`instance` | **R3:** el `ValidationPipe` ya no governs; ahora hay una envoltura propia `{status, error, details, path, timestamp}` | `error.dto.ts` | **Empirica (R3):** los 4 casos medidos; 2 modelos de error coexistiendo |
 | D-06 | `UpdateAtraccionRequest` (objeto vacio, sin propiedades) | `PartialType(CreateAtraccionDto)`: 13 campos opcionales | `atracciones-openapi.yaml:744-746` | por inspeccion |
 | D-07 | Scopes `attractions:read/book/write/webhooks` | `attractions:read/book/write/cancel` (`main.ts:45`); `attractions:cancel` **no existe** en el YAML y `attractions:webhooks` **no existe** en el codigo | `atracciones-openapi.yaml:515-519` vs `src/main.ts:39-53` | por inspeccion |
 | D-08 | `/atracciones/details` devuelve detalles «en los idiomas solicitados» | `dto.languages` se recibe y **se ignora por completo** | `atracciones.service.ts:122-132` | por inspeccion |
@@ -108,6 +111,9 @@ Tabla de conformance. «Verificacion» indica como se obtuvo la evidencia.
 | D-11 | `SearchAtraccionesRequest.currency` (obligatorio) | Se valida y **se ignora**; no hay conversion de moneda | idem | por inspeccion |
 | **D-12** | Alta | `Idempotency-Key` sin descripcion y dependiente de la introspeccion; ausente en 3 modulos | `atracciones.controller.ts`; yaml:318, 358 | **Empirica** (R2) |
 | **D-13** | Media | Doble eje de version sin relacion; `servers` no declarado; 0 anotaciones `@Version()` | `src/main.ts:9-13, 38` | **Empirica** (R2) |
+| **M-24** | Media | `ErrorDto.details` publicado como `type: object`; el servidor envia `string` o `string[]` | `error.dto.ts:13` | **Empirica** (R3) |
+| **M-25** | Media | `error` publica nombres de clase del framework (`NotFoundException`, `HttpException`) | `http-exception.filter.ts:29` | **Empirica** (R3) |
+| **M-26** | Media | La envoltura nueva aleja el contrato del `ProblemDetails` del YAML | `error.dto.ts` vs yaml:522-540 | **Empirica** (R3): 15 respuestas `ErrorDto`, **0** `problem+json` |
 
 ### 3.1 D-09 / D-10: el hallazgo con mayor impacto de negocio
 
@@ -158,6 +164,65 @@ throw new NotFoundException({
 2. **Los errores de validacion no cumplen el esquema.** El `ValidationPipe` produce `{statusCode, message[], error}`. Un cliente que desserialice `ProblemDetails` obtendra `type`, `title`, `status` y `detail` como `undefined` en todos los 400 de validacion, que son los mas frecuentes.
 
 **Correccion.** Filtro global de excepciones que (a) fije `application/problem+json` para toda respuesta >= 400, (b) traduzca la salida del `ValidationPipe` al esquema `ProblemDetails` aggregating los mensajes en `detail`, y (c) emita un `request_id` en `detail` o en una extension para correlación con los logs. Ademas, declarar en el contrato las respuestas **401** y **403**, hoy ausentes pese a que el contrato exige OAuth2 (D-01).
+
+### 4.1 Revision 3 — se implementa el filtro, pero no el `Content-Type` (2026-10-04)
+
+La correccion propuesta en el parrafo anterior se aplico **a medias**, y es el resultado mas instructivo de esta revision: el equipo decidio centralizar las respuestas de error —el problema de fondo— pero **no ejecuto la parte del requisito que cambia el protocolo**.
+
+**Lo que se implemento** (`src/common/filters/http-exception.filter.ts`, 35 lineas, `@Catch()` sin argumentos, registrado en `main.ts:31`):
+
+```json
+{"status":404,"error":"NotFoundException","details":"No se encontro una atraccion con el ID: ...","path":"/api/v1/atracciones/...","timestamp":"2026-10-04T16:10:22.824Z"}
+```
+
+**Lo que se verifico, punto por punto:**
+
+| Requisito de la correccion | Estado | Evidencia medida |
+|---|---|---|
+| (a) Fijar `application/problem+json` | **NO HECHO** | `Content-Type: application/json; charset=utf-8` en 404, 400 y 500 |
+| (b) Traducir a `ProblemDetails` | **NO HECHO** — se creo otro modelo | 0 respuestas `application/problem+json` en el documento; 15 con `ErrorDto` |
+| (c) Emitir `request_id` para correlacion | **NO HECHO** | ningun campo de correlacion en la respuesta ni en la cabecera |
+| Centralizar la forma de error | **HECHO** | los 4 casos probados devuelven la misma envoltura de 5 campos |
+| Declarar el esquema en el contrato | **HECHO** | `ErrorDto` en `components.schemas`, 15 respuestas lo referencian |
+
+**H-08, D-04 y D-05 siguen abiertos**, y el punto (b) es ahora mas grave: el repositorio tiene **dos modelos de error coexistiendo** y el que se ha implementado no es el del SSOT declarado.
+
+**M-24 (nuevo) — el esquema publicado no describe lo que se envia.** `ErrorDto.details` esta declarado como `string | string[]`; `@nestjs/swagger` no expresa uniones y lo publica como **`"type": "object"`**:
+
+| Caso real | `details` enviado | Tipo declarado |
+|---|---|---|
+| 404 de recurso | **string** | `object` |
+| 400 de validacion | **string[]** | `object` |
+| 400 del guard de idempotencia | **string** | `object` |
+| 500 | **string** | `object` |
+
+Un cliente que genere su tipo desde el contrato declarara `details` como objeto y fallara al deserializar los cuatro casos. Ademas, `ErrorDto` no marca `nullable` ni usa `oneOf`, de modo que el modelo publicado no tiene ninguna forma de representar lo que el servidor produce.
+
+**M-25 (nuevo) — `error` publica nombres de clase del framework.** `error: exception.name` introduce en el contrato publico `NotFoundException`, `BadRequestException`, `HttpException` e `InternalServerError`. Tres problemas concretos: el 400 del guard de idempotencia lanza `new HttpException(...)` y por tanto se serializa como `"HttpException"`, que **no discrimina nada**; el valor cambia si NestJS renombra la clase, sin que el YAML se entere; y nombra la framework y su jerarquia a cualquier consumidor.
+
+**M-26 (nuevo) — divergencia cuantificada con el SSOT.**
+
+| Campo RFC 7807 (`ProblemDetails` del YAML) | Equivalente en `ErrorDto` | Estado |
+|---|---|---|
+| `type` (URI de referencia) | — | **ausente** |
+| `title` | `error` | semantica distinta: nombre de clase, no titulo estable traducible |
+| `status` | `status` | coincide |
+| `detail` | `details` | cambia de tipo (M-24) |
+| `instance` | `path` | incluye la query string |
+| — | `timestamp` | campo nuevo, no documentado en el YAML |
+
+**Y M-21 empeora.** `main.ts:52` sigue publicando «Los errores siguen el estandar RFC 7807 (application/problem+json)» en un sistema donde ahora existe un filtro dedicado que emite `application/json`. La afirmacion no era falsa por descuido: ahora es falsa **a pesar** de haber implementado el mecanismo que la haria verdadera.
+
+**Decision pendiente, y es de arquitectura, no de codigo.** Hay que elegir cual es la fuente de verdad:
+
+| Opcion | Consecuencia |
+|---|---|
+| **Gana el YAML** | `ErrorDto` serializa a `ProblemDetails`, se sirve como `application/problem+json`, se anaden `type`, `title` e `instance`, y se corrige `main.ts:52` |
+| **Gana el codigo** | Se actualiza el YAML al nuevo modelo, se corrige `main.ts:52`, y se acepta que `error` deje de ser un nombre de clase |
+
+Lo que **no** es admisible es mantener las dos descripciones a la vez: es exactamente el estado que H-14 y D-01 ya vienen señalando desde la R1.
+
+**Lo que si esta bien:** por primera vez las respuestas de error tienen un esquema publicado en lugar de texto libre. Es el camino correcto; lo que falla es la forma concreta.
 
 ---
 
@@ -420,8 +485,8 @@ Recomendacion: un test de integracion que registre los cuatro modulos simultanea
 | D-01 | Critica | `security` en 0 de 14 operaciones generadas | idem | **Empirica** |
 | D-02 | Alta | Paginacion `offset` vs `page` | yaml:107-117 | por inspeccion |
 | D-03 | Alta | `_links` obligatorio y ausente | `paginated-response.dto.ts:17` | **Empirica** |
-| D-04 | Alta | `Content-Type` incorrecto para errores | `src/main.ts` | **Empirica** |
-| D-05 | Alta | Errores de validacion fuera de `ProblemDetails` | `src/main.ts:17-26` | por inspeccion |
+| D-04 | Alta | `Content-Type` incorrecto para errores | `http-exception.filter.ts:27` | **Empirica (R3): sigue `application/json` pese al filtro |
+| D-05 | Alta | Errores de validacion fuera de `ProblemDetails` | `error.dto.ts` | **Empirica (R3): 2 modelos de error coexistiendo |
 | D-06 | Alta | `UpdateAtraccionRequest` vacio | yaml:744-746 | por inspeccion |
 | D-07 | Alta | Scopes divergentes entre YAML y codigo | yaml:515-519 | por inspeccion |
 | D-08 | Alta | `dto.languages` ignorado | `service:122-132` | por inspeccion |
@@ -429,6 +494,9 @@ Recomendacion: un test de integracion que registre los cuatro modulos simultanea
 | D-10 | Alta | `dates` ignorado | `service:46-120` | **Empirica** |
 | D-11 | Alta | `currency` ignorado | `service:46-120` | por inspeccion |
 | H-10 | Alta | Cabecera de deprecacion en endpoints vivos | `controller:154, 190` | por inspeccion |
+| **M-24** | Media (R3) | `ErrorDto.details` publicado como `object`; el servidor envia `string` o `string[]` | `error.dto.ts:13` | **Empirica:** 404 string, 400 array |
+| **M-25** | Media (R3) | `error` publica nombres de clase del framework | `http-exception.filter.ts:29` | **Empirica:** `NotFoundException`, `HttpException` |
+| **M-26** | Media (R3) | La envoltura nueva aleja el contrato del `ProblemDetails` del YAML | `error.dto.ts` vs yaml | **Empirica:** 15 respuestas `ErrorDto`, 0 `problem+json` |
 | M-15 | Media | Ninguna operacion tiene `operationId` | yaml (global) | por inspeccion |
 | M-16 | Media | Sin politica SemVer ni CHANGELOG | repo | por inspeccion |
 | **D-12** | Alta | `Idempotency-Key` sin descripcion y dependiente de la introspeccion; ausente en 3 modulos | `atracciones.controller.ts`; yaml:318, 358 | **Empirica** (R2) |

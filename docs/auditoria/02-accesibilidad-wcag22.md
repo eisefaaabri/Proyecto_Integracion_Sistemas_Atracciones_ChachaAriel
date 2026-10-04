@@ -1,9 +1,11 @@
 # Informe 02 — Auditoria de Interaccion Humano-Computador y Accesibilidad
 
 **Alcance:** la unica interfaz de usuario existente en el repositorio, mas la especificacion de requisitos de accesibilidad que el contrato OpenAPI impone al front-end pendiente.
-**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04 sobre `a4b4657` (remedicion de A-7 y reverificacion de A-1 a A-5)
+**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04 sobre `a4b4657` (remedicion de A-7 y reverificacion de A-1 a A-5) · **Revision 3:** 2026-10-04 sobre `a39bfe7` + arbol sin commitear (remedicion de A-5 y A-6 tras incorporar `helmet`)
 **Normativa:** WCAG 2.2 nivel AA (W3C Recommendation, octubre 2023) · EN 301 549:2022 · ISO 9241-210:2019
 **Metodo:** inspeccion del HTML servido, medicion real de recursos, verificacion de cabeceras HTTP. Todas las cifras proceden de peticiones HTTP reales, no de estimaciones.
+
+**Resultado de la Revision 3 (2026-10-04, commit `a39bfe7` + cambios sin commitear):** **1 hallazgo nuevo (H-16), 0 cerrados, 1 mitigado (A-05) y 1 remedido (A-06).** La revision propuesta por este informe se aplicó: `app.use(helmet())` con `helmet: ^8.3.0` en `dependencies`. **A-05 pasa de 0 de 8 a 13 de 16 cabeceras de seguridad presentes**, `X-Powered-By` desaparece y la CSP generada **no rompe Swagger UI** (los 6 activos se sirven con normalidad). La parte de **CORS de A-05 no se resuelve y empeora**: `credentials: true` se anade sin cambiar el origen `*`, combinacion invalida segun Fetch (**H-16**). **A-06** sube de 1 884 202 a **1 888 498 B** por el esquema `ErrorDto` incrustado en el documento; el ratio sigue en **8,2x**. Los criterios WCAG 3.1.1, 2.4.1, 1.4.10, 2.4.2 y 1.3.1 **no cambian**: el marcado servido es el mismo. La distincion importante es que **cabeceras HTTP y WCAG son cosas distintas**: Helmet mejora la postura de seguridad sin aportar un solo criterio de accesibilidad.
 
 **Resultado de la Revision 2 (2026-10-04, commit `a4b4657`):** **0 hallazgos nuevos y 0 cerrados.** El commit `b83a884` (versionado nativo) no altera la interfaz: `/api/docs` sigue en la misma ruta y se sigue sirviendo con 3 126 B de HTML, `lang="en"`, sin `meta viewport`, sin compresion y con 0 de 8 cabeceras de seguridad. Los hallazgos **A-01 a A-06 permanecen abiertos**; solo se ha remedido A-06 (1 884 754 → **1 884 202 B**). La eliminacion de `@ApiHeader('Idempotency-Key')` en los controladores afecta al **contenido** del documento, no a su marcado: el formulario «Try it out» de los 2 endpoints de reserva deja de mostrar la descripcion de la cabecera, lo que es un problema de **contenidoAccessible** y se registra como **H-14** en el [informe 01](01-arquitectura-y-rendimiento.md), no como un incumplimiento de WCAG.
 
@@ -112,7 +114,7 @@ El arbol de accesibilidad lo construye `swagger-ui-bundle.js` en tiempo de ejecu
 
 **Correccion.** (1) Enlace de salto visible al enfocar, `href="#swagger-ui"`, como primer elemento del `body`. (2) Envolver el contenido en `<main>`. Ambas requieren el shell propio de A-01.
 
-## A.6 A-05 — Cabeceras de seguridad ausentes · CRITICA
+## A.6 A-05 — Cabeceras de seguridad ausentes · CRITICA · **MITIGADO EN R3 (parcial)**
 
 Verificado con `curl -D -` sobre la respuesta de `/api/docs`:
 
@@ -131,6 +133,36 @@ Verificado con `curl -D -` sobre la respuesta de `/api/docs`:
 
 **Correccion.** `app.use(helmet())` con CSP explicito (el de helmet rompe Swagger UI por su `unsafe-inline` en estilos; usar `styleSrc: ["'self'", "'unsafe-inline'"]`), y `app.enableCors({ origin: <lista explicita>, credentials: true })`.
 
+### A.6.1 Revision 3 — resultado tras incorporar `helmet` (2026-10-04)
+
+La revision propuesta por este informe **se aplicó tal cual**: `src/main.ts:14` hace `app.use(helmet())` y `helmet: ^8.3.0` está en `dependencies`. Remedido sobre `/api/docs`:
+
+| Cabecera | R1/R2 | R3 | Valor servido |
+|---|---|---|---|
+| `Content-Security-Policy` | AUSENTE | **PRESENTE** | `default-src 'self'; base-uri 'self'; frame-ancestors 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' https: 'unsafe-inline'; img-src 'self' data:; font-src 'self' https: data:; form-action 'self'; upgrade-insecure-requests` |
+| `X-Content-Type-Options` | AUSENTE | **PRESENTE** | `nosniff` |
+| `X-Frame-Options` | AUSENTE | **PRESENTE** | `SAMEORIGIN` |
+| `Strict-Transport-Security` | AUSENTE | **PRESENTE** | `max-age=31536000; includeSubDomains` |
+| `Referrer-Policy` | AUSENTE | **PRESENTE** | `no-referrer` |
+| `X-Powered-By: Express` | PRESENTE | **ELIMINADO** | — |
+| `Cross-Origin-Opener-Policy` | — | **PRESENTE** | `same-origin` |
+| `Cross-Origin-Resource-Policy` | — | **PRESENTE** | `same-origin` |
+| `Origin-Agent-Cluster` | — | **PRESENTE** | `?1` |
+| `X-Download-Options` | — | **PRESENTE** | `noopen` |
+| `X-Permitted-Cross-Domain-Policies` | — | **PRESENTE** | `none` |
+| `X-XSS-Protection` | — | **PRESENTE** | `0` (desactivado, valor recomendado actual) |
+| `X-DNS-Prefetch-Control` | — | **PRESENTE** | `off` |
+| `Permissions-Policy` | AUSENTE | **AUSENTE** | helmet 8 no la emite por defecto; hay que declararla |
+| `Access-Control-Allow-Origin: *` | PRESENTE | **PRESENTE** | `*` — **empeora**, ver H-16 |
+| `Content-Encoding` | AUSENTE | AUSENTE | Sin compresion (A-06) |
+| `Cache-Control` | AUSENTE | AUSENTE | Sin politica de cache |
+
+**Recuento: de 0 de 8 cabeceras de seguridad a 13 de 16 presentes.** La parte de **cabeceras de A-05 queda resuelta**. La parte de **CORS no**, y empeora: `credentials: true` se ha anadido sin cambiar el origen.
+
+**La CSP no rompe Swagger UI.** Los 6 activos se sirven con normalidad y el HTML shell sigue en 3 126 B. La configuracion por defecto de helmet incluye `'unsafe-inline'` en `style-src`, que es lo que permite que Swagger UI aplique sus estilos en runtime; es el mismo valor que este informe recomendaba. Se podria endurecer retirando ese `'unsafe-inline'`, pero **solo tras verificar en navegador** que la documentacion sigue renderizando, porque Swagger UI depende de estilos en linea.
+
+**Lo que queda abierto de A-05:** `Permissions-Policy` sin declarar y la combinacion de CORS (H-16). **El hallazgo no se cierra; se mitiga.**
+
 ## A.7 A-06 — Presupuesto de rendimiento de la interfaz: excedido 8,2x · CRITICA
 
 **Medicion real** de los recursos de `/api/docs`:
@@ -139,13 +171,15 @@ Verificado con `curl -D -` sobre la respuesta de `/api/docs`:
 |---|---:|---:|---:|---|
 | `swagger-ui-bundle.js` | 1 452 753 | **1 418,7** | 250 KB | FAIL **5,7x** |
 | `swagger-ui-standalone-preset.js` | 230 293 | 224,9 | — | precargado |
-| `swagger-ui-init.js` | **44 666** | 43,6 | 50 KB | OK |
+| `swagger-ui-init.js` | **48 962** | 47,8 | 50 KB | OK (R2: 44 666) |
 | `swagger-ui.css` | 152 071 | **148,5** | 100 KB | FAIL 1,5x |
 | `favicon-16/32.png` | 1 293 | 1,2 | — | OK |
 | HTML shell | 3 126 | 3,1 | — | OK |
-| **TOTAL** | **1 884 202** | **1 840,0** | **225 KB** | **FAIL 8,2x** |
+| **TOTAL** | **1 888 498** | **1 844,2** | **225 KB** | **FAIL 8,2x** |
 | Total CSS | | 148,5 | 100 KB | FAIL |
-| Total JS | | **1 687,2** | 200 KB | **FAIL 8,4x** |
+| Total JS | | **1 692,6** | 200 KB | **FAIL 8,5x** |
+
+**Revision 3:** el total pasa de 1 884 202 a **1 888 498 B** (+4 296). El unico activo que cambia es `swagger-ui-init.js` (**44 666 → 48 962 B**), que es donde Nest incrusta el documento OpenAPI: el crecimiento coincide con la incorporacion del esquema `ErrorDto` y sus 15 referencias. Helmet no altera el cuerpo de ninguna respuesta. El ratio se mantiene en **8,2x**.
 
 **Compresion: ausente.** Verificado con peticion condicional:
 
@@ -325,6 +359,7 @@ Los limites deben verificarse en CI, no confiar en la revision:
 | A-02 | Media | Titulo generico | 2.4.2 (A) | `<title>Swagger UI</title>` |
 | A-03 | Critica | Sin `meta viewport`; Reflow imposible en movil | 1.4.10 (AA) | 0 ocurrencias en 3 126 B |
 | A-04 | Critica | Sin bloques de derivacion ni landmarks | 2.4.1 (A), 1.3.1 (A) | `role=`/`aria-*`/`<main>` = 0 |
-| A-05 | Critica | 6 cabeceras de seguridad ausentes; CORS abierto | — (seguridad) | `curl -D -` |
-| A-06 | Critica | Presupuesto excedido 8,2x; sin compresion | — (rendimiento) | 1 884 202 B medidos (R2) |
+| A-05 | Critica | Cabeceras de seguridad ausentes; CORS abierto | — (seguridad) | **MITIGADO en R3**: 13 de 16 cabeceras; CORS empeora (H-16) |
+| A-06 | Critica | Presupuesto excedido 8,2x; sin compresion | — (rendimiento) | **1 888 498 B** medidos (R3) |
 | A-07 | Pendiente | Contraste y teclado sin verificar | 1.4.3, 2.1.1 | sin instrumentacion |
+| **H-16** | Alta (R3) | `origin: '*'` con `credentials: true`; `FRONTEND_URL` sin definir | — (seguridad) | `ACAO: *` + `ACAC: true` |

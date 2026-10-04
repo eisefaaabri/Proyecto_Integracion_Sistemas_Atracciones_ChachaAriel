@@ -95,16 +95,16 @@ Resultado de la sesion del 2026-09-30 contra `dist/main.js` en `http://localhost
 
 | Metrica | Valor | Fuente |
 |---|---|---|
-| Archivos TypeScript (total repo) | 52 | Recuento |
-| Lineas de codigo (total repo) | **3 725** (R1: 3 742) | Recuento |
-| Lineas en el scope auditado | **2 046** (R1: 2 056) | Recuento |
+| Archivos TypeScript (total repo) | 54 | Recuento |
+| Lineas de codigo (total repo) | **3 796** (R2: 3 725 · R1: 3 742) | Recuento |
+| Lineas en el scope auditado | **2 100** (R2: 2 046 · R1: 2 056) | Recuento |
 | Errores de `tsc --noEmit` | **0** | `npx tsc --noEmit` |
 | Errores de compilacion | **0** | `npx nest build` |
 | Inicializacion de `TypeOrmCoreModule` | **+337 ms** | Log de Nest |
 | Resolucion de rutas | **+46 ms** | Log de Nest |
 | Rutas mapeadas | 14 | Log de Nest |
 
-**Lectura.** El arranque es correcto y rapido. La inicializacion de TypeORM (337 ms) domina, lo cual es normal y esperable con `autoLoadEntities` y `synchronize` activo. **`synchronize: true` en desarrollo implica DDL en cada arranque**, y con 9 entidades y 6 tablas pivote y `CHECK`, la ejecucion de migraciones es un coste recurrente que en produccion debe ser sustituido por migraciones versionadas (H-09).
+**Lectura.** El arranque es correcto y rapido. La inicializacion de TypeORM (337 ms) domina, lo cual es normal y esperable con `autoLoadEntities`. En R3 **`synchronize` paso a ser opt-in** (`DB_SYNCHRONIZE === 'true'`), por lo que el arranque ya **no ejecuta DDL**: verificado contra una base de datos vacia, no crea esquema ni tablas. El coste de arranque baja, y con el aparece el problema de H-09 descrito en el §9.2 del [informe 01](01-arquitectura-y-rendimiento.md): **sin migraciones cableadas, un entorno nuevo no tiene forma de instalar el esquema**.
 
 ### 4.2 Latencia por operacion
 
@@ -138,15 +138,15 @@ Condiciones: cliente y servidor en el mismo host, dataset de 1 a 18 atracciones,
 |---|---:|---:|---:|---|
 | `swagger-ui-bundle.js` | 1 452 753 | 1 418,7 | 250 KB | 5,7× |
 | `swagger-ui-standalone-preset.js` | 230 293 | 224,9 | — | — |
-| `swagger-ui-init.js` | **44 666** | 43,6 | 50 KB | — |
+| `swagger-ui-init.js` | **48 962** | 47,8 | 50 KB | — |
 | `swagger-ui.css` | 152 071 | 148,5 | 100 KB | 1,5× |
 | `favicon` ×2 | 1 293 | 1,2 | — | — |
 | HTML shell | 3 126 | 3,1 | — | — |
-| **TOTAL** | **1 884 202** | **1 840,0** | **225 KB** | **8,2×** |
+| **TOTAL** | **1 888 498** | **1 844,2** | **225 KB** | **8,2×** |
 | CSS total | | 148,5 | 100 KB | 1,5× |
-| JS total | | 1 687,2 | 200 KB | 8,4× |
+| JS total | | 1 692,6 | 200 KB | 8,5× |
 
-**Cifras de la R2** (2026-10-04, remedicion): solo cambia `swagger-ui-init.js` (45 218 → **44 666 B**), que embebe el documento OpenAPI; el resto de activos es identico y el ratio se mantiene en 8,2×.
+**Cifras de la R3** (2026-10-04, remedicion): el total pasa de 1 884 202 a **1 888 498 B** (+4 296). El unico activo que cambia es `swagger-ui-init.js` (44 666 → **48 962 B**), que embebe el documento OpenAPI: el crecimiento coincide con la incorporacion del esquema `ErrorDto` y sus 15 referencias. Helmet no altera el cuerpo de las respuestas. El ratio se mantiene en **8,2×**.
 
 **Compresion:** ausente. `bundle.js` responde con 1 452 753 bytes tanto con como sin `Accept-Encoding`. Impacto estimado con gzip: total de ~500 KB.
 
@@ -163,8 +163,9 @@ Condiciones: cliente y servidor en el mismo host, dataset de 1 a 18 atracciones,
 | Claves YAML duplicadas | **2** (1 destructiva) | PyYAML |
 | Criterios WCAG 2.2 AA en fallo en la UI existente | **3** | Inspeccion del HTML servido |
 | Criterios WCAG pendientes de verificacion | **3** | Sin instrumentacion |
-| Cabeceras de seguridad ausentes | **6** | `curl -D -` |
-| Hallazgos totales | **46** (5 criticos, 13 altos, 20 medios, 8 bajos) | Consolidado de los 4 informes |
+| Cabeceras de seguridad presentes | **13 de 16** (R1/R2: 0 de 8; `X-Powered-By` eliminado) | `curl -D -` |
+| Respuestas `application/problem+json` | **0** | `GET /api/docs-json` |
+| Hallazgos totales | **56** (5 criticos, 16 altos, 26 medios, 9 bajos) | Consolidado de los 4 informes |
 
 **Tasa de error observada durante la sesion de pruebas:** 0 errores de servidor. Los 13 casos de prueba devolvieron respuestas correctas segun el codigo implementado. **Esto es precisamente el problema**: la API responde con exito a peticiones que no deberian aceptarse (escritura sin token, sobreventa, `rows` de 5 millones, filtros ignorados). Una tasa de error del 0 % en estas condiciones indica ausencia de validacion, no ausencia de defectos.
 
@@ -329,12 +330,93 @@ La sesión del 2026-10-04 fue de **solo lectura**: no se creó ni modificó ning
 
 ### 9.4 Conteo final de hallazgos
 
-| Severidad | R1 | R2 | Total |
-|---|---:|---:|---:|
-| Criticos | 5 | 0 | **5** |
-| Altos | 13 | +1 (H-14) | **14** |
-| Medios | 20 | +3 (M-21, M-22, M-23) | **23** |
-| Bajos | 8 | 0 | **8** |
-| **Total** | **46** | **+4** | **50** |
+| Severidad | R1 | R2 | R3 | Total |
+|---|---:|---:|---:|---:|
+| Criticos | 5 | 0 | 0 | **5** |
+| Altos | 13 | +1 (H-14) | +2 (H-15, H-16) | **16** |
+| Medios | 20 | +3 (M-21, M-22, M-23) | +4 (M-24, M-25, M-26, M-27) | **27** |
+| Bajos | 8 | 0 | +1 (L-02) | **9** |
+| **Total** | **46** | **+4** | **+7** | **57** |
 
-**Ninguno de los 46 hallazgos de la Revisión 1 se ha cerrado.** Los 5 críticos permanecen abiertos y verificados.
+**Ninguno de los 46 hallazgos de la Revision 1 se ha cerrado.** Los 5 criticos permanecen abiertos y verificados.
+
+**Mitigaciones parciales en R3:** **A-05** (parte de cabeceras de seguridad: de 0 de 8 a 13 de 16) y **H-09** (`synchronize` pasa a opt-in; persiste la ausencia de migraciones).
+
+---
+
+## 10. Revision 3 — Sesion del 2026-10-04 sobre `a39bfe7`
+
+### 10.1 Registro de la sesion
+
+| # | Actividad | Resultado | Evidencia |
+|---|---|---|---|
+| 1 | Inventario de cambios desde `a4b4657` | 1 commit (`a39bfe7`) + 5 ficheros modificados + 2 nuevos sin commitear | `git log`, `git status` |
+| 2 | Lectura de `src/main.ts` (78 lineas) | `helmet()`, CORS parametrizado, `HttpExceptionFilter` global | `main.ts:14, 23-31` |
+| 3 | Lectura de `src/app.module.ts` (33 lineas) | `synchronize: DB_SYNCHRONIZE === 'true'` | `app.module.ts:22` |
+| 4 | `tsc --noEmit` | **0 errores** | exit code 0 |
+| 5 | `nest build` | **correcto** | exit code 0 |
+| 6 | Cabeceras de seguridad de `/api/docs` | **13 de 16 presentes**; CSP, HSTS, `X-Frame-Options`, `nosniff`; **`X-Powered-By` eliminado** | peticion HTTP |
+| 7 | Verificacion de que la CSP rompe Swagger | **No rompe**: los 6 activos se sirven; shell en 3 126 B | peticion HTTP a los 6 recursos |
+| 8 | CORS efectivo | `Access-Control-Allow-Origin: *` + `Access-Control-Allow-Credentials: true` | peticion HTTP |
+| 9 | `.env` (valores no sensibles) | `NODE_ENV=development`, `PORT=3000`, `DB_SYNCHRONIZE=false`. **`FRONTEND_URL` no existe** | lectura de `.env` |
+| 10 | `.env.example` | Solo `DATABASE_URL`, `NODE_ENV`, `PORT`. **Faltan `DB_SYNCHRONIZE` y `FRONTEND_URL`** | lectura del archivo |
+| 11 | Forma de las respuestas de error | 404, 400 de validacion, 400 del guard y 500 devuelven la misma envoltura de 5 campos | `curl` a 4 endpoints |
+| 12 | `Content-Type` de error | **`application/json; charset=utf-8`** en los 4 casos | `curl -w %{content_type}` |
+| 13 | `details` real por caso | 404 → **string**, 400 validacion → **string[]**, 400 guard → **string**, 500 → **string** | corps de las 4 respuestas |
+| 14 | `error` real por caso | `NotFoundException`, `BadRequestException`, `HttpException`, `InternalServerError` | corps de las 4 respuestas |
+| 15 | `ErrorDto` en el documento generado | Presente en `components.schemas`; **15 respuestas** lo referencian; **0** `application/problem+json` | `GET /api/docs-json` |
+| 16 | Esquema publicado de `details` | **`"type": "object"`**, con `example` de array | `GET /api/docs-json` |
+| 17 | Arranque con `PORT=3111` (string) | **Abre puerto TCP** `0.0.0.0:3111 LISTENING`; no es named pipe | `netstat`, log de Nest |
+| 18 | Arranque contra esquema inexistente | Arranca correcto; las consultas siguen leyendo de `public` (el parametro `schema` de la URL no aísla) | peticion HTTP |
+| 19 | **Arranque contra base de datos vacia** con `DB_SYNCHRONIZE=false` | **Arranca correcto**; `health` → **200 `UP`**; `GET /atracciones` → **500**; **0 tablas creadas** | log de Nest, `curl`, `psql` |
+| 20 | Log del servidor ante el 500 anterior | `QueryFailedError`, `42P01`, `does not exist` → **0 coincidencias** | `Select-String` sobre el log |
+| 21 | `as any` en el scope | **6** (R1/R2: 4); los 2 nuevos en `http-exception.filter.ts:22` | `Select-String` |
+| 22 | `common.module.ts` | **Sigue vacio**: `imports: []`, `providers: []`, `exports: []` | lectura del archivo |
+| 23 | Recuento estatico | 54 archivos / **3 796** lineas (repo); 29 archivos / **2 100** lineas (scope) | `Get-ChildItem` + `Get-Content` |
+| 24 | Estado de las instancias de prueba | 3 instancias (3111, 3113, 3114) **detenidas**; puertos libres | `netstat` |
+
+### 10.2 Hallazgo destacado — el arranque "sano" de un sistema inservible
+
+La prueba 19 merece aislarse porque es el resultado mas relevante de la R3. Con `DB_SYNCHRONIZE` desactivado —que es el valor por defecto desde R3— y una base de datos **sin ninguna tabla**:
+
+```
+[Nest] LOG [NestApplication] Nest application successfully started
+
+GET /api/v1/atracciones/health   -> 200  {"status":"UP","timestamp":"..."}
+GET /api/v1/atracciones          -> 500  {"status":500,"error":"InternalServerError",
+                                            "details":"Internal server error", ...}
+psql> SELECT count(*) FROM pg_tables  -> 0
+```
+
+El arranque es correcto, el endpoint de salud **responde `UP`** y el servicio es incapaz de devolver una sola fila. Como no hay migraciones cableadas, no existe ninguna secuencia de instalacion que produzca el esquema: hay que arrancar a mano con `DB_SYNCHRONIZE=true` una vez y confiar en que el DDL de TypeORM sea equivalente al esquema de produccion.
+
+La causa es que **H-09 se ha mitigado a medias**. Se eliminó el peligro de reescritura de tablas en caliente, pero el riesgo no se resolvió: **cambió de sitio**, del despliegue al desarrollador, y ahora viene acompañado de un `health` que afirma lo contrario. Esto eleva **R-08** —caida de PostgreSQL no detectada— de "riesgo alto" a fallo de operacion sin senal, y por eso el filtro que traga los 500 sin registrar (**H-15**) pasa dejevdad de inconvenience a un debugger.
+
+### 10.3 Registro de limpieza del entorno (R3)
+
+La sesion del 2026-10-04 (segunda tanda) creo **una** base de datos auxiliar vacia, `r3_scratch`, exclusivamente para producir la evidencia del §10.2. Fue eliminada al terminar.
+
+| Comprobacion | Resultado |
+|---|---|
+| Base de datos `r3_scratch` | **CREADA y eliminada** (`DROP DATABASE`) |
+| Bases de datos de prueba residuales | **0** (`r3_%` y `db_inexistente_r3`) |
+| Filas creadas o modificadas | **0** |
+| Migraciones ejecutadas | **0** |
+| Cambios de esquema | **0** |
+| Instancias de servicio lanzadas | **3** (puertos 3111, 3113, 3114), **todas detenidas** |
+| Archivos del proyecto modificados | **0** — solo `docs/auditoria/**` |
+
+**Estado de la base de datos al cierre:** `atracciones: 1`, `reservations: 1`. La reserva es **ajena a esta auditoria** y no se ha tocado (ver §9.3).
+
+> **Nota operativa.** El proceso `nest start --watch` del usuario quedo sin proceso hijo escuchando en el puerto 3000 durante esta sesion, por competencia con el `nest build` ejecutado aqui. No es un defecto del codigo: es una consecuencia de compilar el mismo `dist` mientras el watcher esta activo. Se verifico al cierre que el watcher se recupera por si solo y que `localhost:3000` vuelve a responder **200**, de modo que no requiere intervencion.
+
+### 10.4 Lo que la R3 demuestra sobre el proceso
+
+Las tres revisiones cuentan una progresion que merece registrarse:
+
+| Revision | Que cambio el equipo | Resultado de la auditoria |
+|---|---|---|
+| R1 → R2 | Versionado nativo (correcto) y un `feat!` con salto de version | Correcto con acoplamientos; 4 hallazgos nuevos |
+| R2 → R3 | **Endurecimiento de la configuracion** respondsiendo a hallazgos de la auditoria | **Primer caso de hallazgos parcialmente resueltos**: A-05 (cabeceras) y H-09 (`synchronize`) |
+
+Es la primera vez que una correccion llega desde los informes, y el patron es consistente: **se aplica el mecanismo y se omite el requisito que cambia el protocolo**. En R3 eso significa `helmet` sin `compression`, y el filtro de excepciones sin `application/problem+json`. El mecanismo visible funciona; la propiedad que hace que el sistema sea correcto para un consumidor externo no se implemento. No es un error de ejecucion: es un criterio de aceptacion que los informes deben enunciar de forma verificable —"y el `Content-Type` debe ser `application/problem+json`"— para que pueda comprobarse.

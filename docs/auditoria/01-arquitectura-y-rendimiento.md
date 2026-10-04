@@ -33,14 +33,14 @@
 ### 2.1 Estructura de capas
 
 ```
-HTTP  ──▶  AtraccionesController        (318 loc)   transporte, binding, HATEOAS, cabeceras
-              │  validación declarativa (class-validator + ValidationPipe global)
-              ▼
-           AtraccionesService           (745 loc)   caso de uso, orquestación, mapeo, helpers
-              │
-              ├─▶ Repository (TypeORM/PostgreSQL)    persistencia
-              ├─▶ Entidades  (9)                     modelo de dominio / esquema
-              └─▶ DTOs        (8)                    contrato de entrada/salida
+HTTP ──▶ AtraccionesController (318 loc) transporte, binding, HATEOAS, cabeceras
+ │ validación declarativa (class-validator + ValidationPipe global)
+ ▼
+ AtraccionesService (745 loc) caso de uso, orquestación, mapeo, helpers
+ │
+ ├─▶ Repository (TypeORM/PostgreSQL) persistencia
+ ├─▶ Entidades (9) modelo de dominio / esquema
+ └─▶ DTOs (8) contrato de entrada/salida
 ```
 
 **Veredicto sobre MVC / Vista-Controlador.** El enunciado exige «estricta separación entre la lógica de presentación y la lógica de negocio». En un backend REST la equivalencia correcta es **Controller = Vista adaptadora**, y el criterio a evaluar es si el controlador contiene lógica de negocio. **El criterio se cumple**: los 13 handlers de `atracciones.controller.ts` solo delegan, ajustan `HttpCode` y `Location`, y declaran metadatos OpenAPI. No hay reglas de negocio, ni acceso a repositorios, ni construcción de SQL en la capa de transporte. ✅
@@ -48,13 +48,13 @@ HTTP  ──▶  AtraccionesController        (318 loc)   transporte, binding, H
 **Reservas detectadas (no bloqueantes para MVC, sí para mantenibilidad):**
 
 - **`AtraccionesService` es una clase Dios.** 745 líneas, 6 repositorios inyectados, 4 responsabilidades mezcladas: casos de uso (`search`, `reserve`, `cancelReservation`), acceso a datos (`findOrCreate*`, `update`, `replace`), mapeo de presentación (`toResponse` de 65 líneas, `toReservationResponse`) y utilidades (`generateRequestId`). Viola SRP. Un cambio en el formato de respuesta obliga a tocar la misma clase que contiene la lógica transaccional.
-  - **Recomendación:** extraer `AtraccionesMapper` (presentación), `CatalogNormalizer` (los `findOrCreate*`) y `AvailabilityPolicy` (capacidad/cupos), dejando el servicio como orquestador.
+ - **Recomendación:** extraer `AtraccionesMapper` (presentación), `CatalogNormalizer` (los `findOrCreate*`) y `AvailabilityPolicy` (capacidad/cupos), dejando el servicio como orquestador.
 
 - **Los mappers son privados, no hay frontera de contrato.** `toResponse()` devuelve un objeto literal anónimo cuyo tipo no se valida contra `AtraccionResponseDto`. Nada impide que se desincronicen; de hecho ya lo están (véase §2.3).
 
 ### 2.2 Modelo de datos — normalización 3FN
 
-El commit `0cceeb5` («Normalizacion 3FN … ISO/IEC 9126-3») es un **acierto arquitectónico** y debe preservarse. Se eliminaron las columnas JSONB compuestas y se.《normalizaron»:
+El commit `0cceeb5` («Normalizacion 3FN … ISO/IEC 9126-3») es un **acierto arquitectónico** y debe preservarse. Se eliminaron las columnas JSONB compuestas y se normalizaron:
 
 | Antes (JSONB) | Ahora (3FN) | Restricción de integridad |
 |---|---|---|
@@ -146,16 +146,16 @@ SeMikeStephenVerdicts marcadas ✅:
 
 ```ts
 private async findOrCreateCategories(names: string[]): Promise<Category[]> {
-  const categories: Category[] = [];
-  for (const name of names) {            // ← secuencial
-    let cat = await this.categoryRepository.findOne({ where: { name } });
-    if (!cat) {
-      cat = this.categoryRepository.create({ name });
-      await this.categoryRepository.save(cat);
-    }
-    categories.push(cat);
-  }
-  return categories;
+ const categories: Category[] = [];
+ for (const name of names) { // ← secuencial
+ let cat = await this.categoryRepository.findOne({ where: { name } });
+ if (!cat) {
+ cat = this.categoryRepository.create({ name });
+ await this.categoryRepository.save(cat);
+ }
+ categories.push(cat);
+ }
+ return categories;
 }
 ```
 
@@ -166,9 +166,9 @@ Agravante: `create()`, `replace()` y `update()` invocan los tres helpers, de mod
 **Recomendación.** Resolver los tres catálogos en una sola pasada por lote:
 
 ```
-1 SELECT * FROM categories WHERE name = ANY($1)      → hits
-INSERT INTO categories (name) SELECT unnest($1)      → misses   (una sentencia)
-2 SELECT * FROM categories WHERE name = ANY($1)      → relectura para obtener ids
+1 SELECT * FROM categories WHERE name = ANY($1) → hits
+INSERT INTO categories (name) SELECT unnest($1) → misses (una sentencia)
+2 SELECT * FROM categories WHERE name = ANY($1) → relectura para obtener ids
 ```
 Reducción: 60 consultas → 3. Para los 30 categorías, latencia esperada < 50 ms.
 
@@ -180,11 +180,11 @@ Alternativa transaccional: `INSERT ... ON CONFLICT (name) DO UPDATE SET name = E
 
 ```ts
 const manager = this.atraccionRepository.manager;
-await manager.delete(AtraccionLocation, { atraccion_id: id });   // 1
-await manager.delete(AtraccionPhoto,      { atraccion_id: id });   // 2
-await manager.delete(AtraccionInclude,    { atraccion_id: id });   // 3
+await manager.delete(AtraccionLocation, { atraccion_id: id }); // 1
+await manager.delete(AtraccionPhoto, { atraccion_id: id }); // 2
+await manager.delete(AtraccionInclude, { atraccion_id: id }); // 3
 …
-await this.atraccionRepository.save(exists);                       // 4
+await this.atraccionRepository.save(exists); // 4
 ```
 
 Si el paso 4 falla —una restricción `CHECK`, una caída de conexión, un cierre de proceso— la atracción queda **sin ubicaciones, sin fotos y sin includes**, y el cliente ya recibió… nada, porque la petición falló. Peor: si el fallo ocurre entre el paso 1 y el 2, laillonación queda en un estado imposible que ninguna regla de negocio contempla. No hay forma de revertir.
@@ -310,7 +310,7 @@ Indices (§3.6) · logger + `X-Request-Id` + métricas · healthcheck real · su
 | H-06 | Alta | Sin cota de filas | `search-atracciones.dto.ts:74`, `pagination-query.dto.ts:18` | ✅ `rows:5000000` aceptado |
 | H-07 | Alta | Token de paginación no firmado | `atracciones.service.ts:95-113` | por inspección |
 | H-08 | Alta | `Content-Type` de error no conforme | `main.ts` sin filtro global | ✅ `application/json` |
-| H-09 | Alta | `synchronize` activo sin `NODE_ENV` | `app.module.ts:22` | por inspección |
+| H-09 | Alta | `synchronize` activo sin `NODE_ENV` | `app.module.ts:22` | ⚠️ **Mitigado en R3**: ahora opt-in; persiste sin migraciones |
 | H-10 | Alta | Cabecera de deprecación en endpoints vivos | `atracciones.controller.ts:154, 190` | por inspección |
 | H-11 | Alta | Paginación contrato ≠ código | `atracciones-openapi.yaml:107-117` | por inspección |
 | H-12 | Alta | `_links` obligatorio y ausente | `paginated-response.dto.ts:17` | ✅ ausente en la respuesta |
@@ -320,10 +320,22 @@ Indices (§3.6) · logger + `X-Request-Id` + métricas · healthcheck real · su
 
 | ID | Severidad | Hallazgo | Ubicación | Empirical |
 |---|---|---|---|---|
-| **H-14** | Alta | La cabecera obligatoria `Idempotency-Key` pasa a depender de la introspección de NestJS y pierde su descripción en el contrato publicado | 4 controladores, 13 declaraciones (sin commitear) | ✅ `in: header, required: true` sin `description` |
-| **M-21** | Media | `info.description` publica dos afirmaciones falsas: errores RFC 7807 y `Idempotency-Key` obligatorio | `src/main.ts:30-37` | ✅ contradicho por H-08 y H-14 |
+| **H-14** | Alta | La cabecera obligatoria `Idempotency-Key` pasa a depender de la introspección de NestJS y pierde su descripción en el contrato publicado | 4 controladores, 13 declaraciones (commit a39bfe7) | ✅ `in: header, required: true` sin `description` |
+| **M-21** | Media | `info.description` publica dos afirmaciones falsas: errores RFC 7807 y `Idempotency-Key` obligatorio | `src/main.ts:44-53` | ✅ contradicho por H-08 y H-14 |
 | **M-22** | Media | Versionado nativo correcto pero global: 0 anotaciones `@Version()` y sin `servers` en el documento | `src/main.ts:9-13` | ✅ `/api/v1` 200, `/api` y `/api/v2` 404 |
 | **M-23** | Media | `feat!` con salto global de versión revertido sin ruta de deprecación; migraciones no cableadas | `b883d9c` → `a4b4657` | ✅ esquema `uuid` intacto, sin `src/migrations/` |
+
+### 7.2 Hallazgos de la Revisión 3 (2026-10-04)
+
+| ID | Severidad | Hallazgo | Ubicación | Empirical |
+|---|---|---|---|---|
+| **H-15** | Alta | El filtro global captura toda excepción y **no registra** las inesperadas: un 500 por base de datos sin tablas no deja traza | `src/common/filters/http-exception.filter.ts:4, 16-19` | ✅ `QueryFailedError` → **0 coincidencias** en el log |
+| **H-16** | Alta | CORS con `origin: '*'` y `credentials: true`, combinación inválida; `FRONTEND_URL` no existe en ningún archivo de configuración | `src/main.ts:23-28` | ✅ `ACAO: *` + `ACAC: true` |
+| **M-24** | Media | `ErrorDto.details` se publica como `type: object` pero el servidor devuelve `string` o `string[]` | `src/common/dto/error.dto.ts:13` | ✅ 404 → string, 400 → array |
+| **M-25** | Media | El campo `error` publica nombres de clase del framework como parte del contrato | `http-exception.filter.ts:29` | ✅ `NotFoundException`, `HttpException`, `InternalServerError` |
+| **M-26** | Media | La envoltura de error nueva aleja el contrato del `ProblemDetails` del YAML; 0 respuestas `application/problem+json` | `error.dto.ts` vs `contracts/atracciones-openapi.yaml` | ✅ 15 respuestas con `ErrorDto`, 0 con `problem+json` |
+| **M-27** | Media | `.env.example` no documenta `DB_SYNCHRONIZE` ni `FRONTEND_URL` | `.env.example` | ✅ 3 variables declaradas de 5 en uso |
+| **L-02** | Baja | `CommonModule` sigue vacío y el filtro se instancia fuera del contenedor de DI | `src/common/common.module.ts`, `main.ts:31` | ✅ `providers: []`, `new HttpExceptionFilter()` |
 
 ---
 
@@ -339,7 +351,7 @@ La Revisión 2 auditó 4 commits (`d2ef09c`, `b83a884`, `b883d9c`, `a4b4657`) y 
 | `b83a884` | `src/main.ts` (+6 −2) | **Versionado nativo de NestJS**: `setGlobalPrefix('api')` + `enableVersioning({ type: URI, defaultVersion: '1' })` |
 | `b883d9c` | 9 archivos (+116 −22) | `feat!` UUID→varchar con prefijo `ATR_`, salto a `v2`, `data-source.ts` y migración de 77 líneas |
 | `a4b4657` | 9 archivos (−22 +116) | **Revert total** de `b883d9c`, 21 minutos después |
-| Sin commit | 4 controladores (−21) | Eliminación de 13 declaraciones `@ApiHeader('Idempotency-Key')` |
+| a39bfe7 | 4 controladores (−13) | Eliminación de 13 declaraciones `@ApiHeader('Idempotency-Key')` |
 
 **Ningún commit toca `atracciones.service.ts`, las entidades, los DTOs ni el contrato YAML.** Por eso **los 5 hallazgos críticos y los 13 altos de la Revisión 1 siguen exactamente como se describieron**: el servicio continúa sin autenticación, sin control de capacidad y sin transacciones, y las 7 relaciones mantienen `eager: true`.
 
@@ -389,7 +401,7 @@ El hallazgo no es la eliminación en sí, sino que **el contrato publicado pasa 
 
 ### 8.5 La descripción del API afirma dos cosas falsas (M-21)
 
-`src/main.ts:30-37` se publica como descripción autoritativa:
+`src/main.ts:44-53` se publica como descripción autoritativa:
 
 | Afirmación publicada | Realidad verificada |
 |---|---|
@@ -421,3 +433,99 @@ Es el hallazgo que no proviene de un cambio, sino de una omisión: **la descripc
 | `atracciones.service.ts` | 745 | **745** (sin cambios) |
 | `atracciones.controller.ts` | 328 | **318** (−10, por H-14) |
 | `main.ts` | 59 | **61** (+2, por el versionado) |
+
+---
+
+## 9. Revisión 3 — Endurecimiento de la configuración (2026-10-04)
+
+La Revisión 3 auditó el commit `a39bfe7` y 5 ficheros modificados + 2 nuevos sin commitear. Resultado: **0 hallazgos cerrados y 6 nuevos** (2 altos, 3 medios, 1 bajo), más **una mitigación parcial** de H-09. **Ningún cambio toca `atracciones.service.ts`, las entidades ni los DTOs de negocio**: el rendimiento medido en el §3.2 y §3.3 sigue siendo válido sin nueva medición.
+
+### 9.1 Qué se ha modificado
+
+| Cambio | Archivo | Efecto arquitectónico |
+|---|---|---|
+| `a39bfe7` | 4 controladores (−13) | Eliminación de los `@ApiHeader('Idempotency-Key')` ya auditada como H-14 en R2 |
+| Sin commit | `src/main.ts` (78 líneas, +17) | **Helmet**, CORS parametrizado por `FRONTEND_URL` y **filtro global de excepciones** |
+| Sin commit | `src/app.module.ts` (33 líneas) | `synchronize: true` → `synchronize: DB_SYNCHRONIZE === 'true'` |
+| Sin commit | `src/common/dto/error.dto.ts` (nuevo, 18 líneas) | DTO de error publicado en el contrato |
+| Sin commit | `src/common/filters/http-exception.filter.ts` (nuevo, 35 líneas) | Filtro `@Catch()` sin argumentos |
+| Sin commit | `src/modules/atracciones/atracciones.controller.ts` (319 líneas, +16 −15) | `type: ErrorDto` en 15 respuestas de error |
+| Sin commit | `package.json`, `package-lock.json` | Dependencia `helmet: ^8.3.0` |
+
+### 9.2 H-09 mitigado en su mitad peligrosa — y un hueco de arranque nuevo
+
+```diff
+- synchronize: true,
++ synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
+```
+
+**Verificado empíricamente.** Con la variable ausente, el arranque **no ejecuta ninguna DDL**. Se comprobó contra una base de datos vacía: el servidor arranca, no crea ninguna tabla, y el esquema permanece intacto. Esto **elimina el vector de R-13** — la reescritura de tablas en caliente — que era el aspecto más grave de H-09. `.env` local tiene `DB_SYNCHRONIZE=false`.
+
+**Lo que queda es un problema de arranque, y se midió contra una base de datos sin tablas:**
+
+| Comprobación | Resultado medido |
+|---|---|
+| Log de arranque | **`Nest application successfully started`** |
+| `GET /api/v1/atracciones/health` | **200 `{"status":"UP"}`** |
+| `GET /api/v1/atracciones` | **500** `{"status":500,"error":"InternalServerError","details":"Internal server error",...}` |
+| Tablas creadas | **0** |
+| Migraciones cableadas | **0** |
+
+El sistema se declara sano y es incapaz de servir una sola fila. Como no hay migraciones, **no existe camino de instalación para un entorno nuevo**: hay que arrancar a mano con `DB_SYNCHRONIZE=true` una vez, confiar en que el DDL de TypeORM sea equivalente al esquema de producción, y apagar la bandera. R-13 no se ha resuelto: **se ha transferido del despliegue al desarrollador**, y ahora se acompaña de un `health` que miente (R-08).
+
+**Medida:** cablear `migrations` + `data-source.ts`, ejecutar `migration:run` antes de aceptar tráfico, y hacer que `health` ejecute `SELECT 1` sobre la base de datos.
+
+### 9.3 H-15 · El filtro global traga los errores inesperados sin registrarlos (ALTO, nuevo)
+
+`@Catch()` sin argumentos captura **toda** excepción, incluidas las que no son `HttpException`. Para esas, el filtro responde 500 con `details: "Internal server error"` y **descarta la excepción original sin registrarla**.
+
+Evidencia: el 500 por base de datos sin tablas del §9.2. En el log del servidor, las búsquedas de `QueryFailedError`, `42P01` y `does not exist` dan **cero coincidencias**. Un fallo de base de datos, un `TypeError` en un mapper o un error de red producen un 500 indistinguible de un 500 provocado por el cliente.
+
+El filtro por defecto de Nest imprimía la traza; este la elimina. Se pierde R-11 (sin observabilidad) y **R-08 empeora**: una caída de PostgreSQL deja de ser no detectada para ser además no diagnosticable.
+
+**Medida:** inyectar `Logger`, registrar `exception` en `catch()` para todo lo que no sea `HttpException`, y añadir `X-Request-Id` a la respuesta.
+
+### 9.4 H-16 · CORS con comodín y credenciales (ALTO, nuevo)
+
+```ts
+const frontendUrl = configService.get<string>('FRONTEND_URL') || '*';
+app.enableCors({ origin: frontendUrl, methods: '...', credentials: true });
+```
+
+`FRONTEND_URL` **no está en `.env` ni en `.env.example`**, luego el valor efectivo es `'*'`. Medido: `Access-Control-Allow-Origin: *` junto a `Access-Control-Allow-Credentials: true`.
+
+Esa combinación es **inválida** según la especificación Fetch: el navegador rechaza la respuesta cuando el origen reflejado es `*` y la petición es con credenciales. El efecto no es una brecha de seguridad sino una **falla silenciosa del cliente**: cuando el front-end envíe cookies o `Authorization`, cada respuesta se bloqueará y se verá como un error de CORS sin causa evidente. Y si alguien corrige el origen para que funcione, activa credenciales sobre un catálogo que no tiene autenticación (C-01).
+
+**Medida:** `origin` como lista blanca explícita —nunca `*` junto a `credentials: true`—, `FRONTEND_URL` obligatorio en `.env.example`, y validación al arrancar.
+
+### 9.5 Un riesgo verificado que **no** es hallazgo
+
+`configService.get<number>('PORT', 3000)` no convierte el tipo: devuelve el string del `.env`. Se probó con `PORT=3111` y el servidor **sí** abrió un puerto TCP (`netstat` → `0.0.0.0:3111 LISTENING`), porque Node convierte las cadenas numéricas antes de interpretarlas como named pipe. La anotación de TypeScript es incorrecta; el comportamiento es correcto. Se documenta para que no se reporte como defecto.
+
+### 9.6 Verificaciones de la Revisión 3
+
+| Comprobación | R1 | R2 | R3 |
+|---|---|---|---|
+| `tsc --noEmit` | 0 errores | 0 errores | **0 errores** |
+| `nest build` | correcto | correcto | **correcto** |
+| Operaciones en el documento generado | 14 | 14 | **14** |
+| Operaciones con `security` | 0 | 0 | **0** |
+| CORS | `*` | `*` | **`*` + `credentials: true`** |
+| Migraciones cableadas | no | no | **no** |
+| Suites de pruebas | 0 | 0 | **0** |
+| Linting funcional | no | no | **no** |
+| Latencia de lectura del catálogo | p50 1 049 ms | sin remedir | **sin remedir** (el servicio no cambió) |
+
+### 9.7 Métricas de código actualizadas
+
+| Métrica | R1 | R2 | R3 |
+|---|---:|---:|---:|
+| Archivos `.ts` del repositorio | 52 | 52 | **54** |
+| Líneas del repositorio | 3 742 | 3 725 | **3 796** |
+| Líneas del alcance auditado | 2 056 | 2 046 | **2 100** |
+| `atracciones.service.ts` | 745 | 745 | **745** (sin cambios) |
+| `atracciones.controller.ts` | 328 | 318 | **319** (+1, por `ErrorDto`) |
+| `main.ts` | 59 | 61 | **78** (+17, por Helmet, CORS y filtro) |
+| `as any` en el alcance | 4 | 4 | **6** |
+
+> **Nota sobre el servidor de desarrollo.** El proceso `nest start --watch` del usuario quedó sin proceso hijo escuchando en el puerto 3000 durante esta revisión, por competencia con el `nest build` ejecutado en la sesión. Todas las mediciones de R3 se hicieron contra instancias propias controladas (puertos 3111, 3113 y 3114), compiladas desde el mismo `dist` y detenidas al terminar. Se verifico al cierre que el watcher se recupera por si solo y que `localhost:3000` vuelve a responder **200**, de modo que no requiere intervencion. El §3 no se remidió porque ningún cambio afecta al servicio.

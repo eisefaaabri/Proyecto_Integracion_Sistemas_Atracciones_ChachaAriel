@@ -19,7 +19,7 @@ import { AtraccionesModule } from './modules/atracciones/atracciones.module';
         type: 'postgres',
         url: configService.get<string>('DATABASE_URL'),
         autoLoadEntities: true,
-        synchronize: configService.get<string>('NODE_ENV') !== 'production',
+        synchronize: configService.get<string>('DB_SYNCHRONIZE') === 'true',
       }),
     }),
 

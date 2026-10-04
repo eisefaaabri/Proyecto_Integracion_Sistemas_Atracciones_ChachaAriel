@@ -48,11 +48,12 @@ Lo mismo ocurre con **`npm run format`** (`package.json:10`): invoca `prettier`,
 
 | Metrica | Scope auditado | Repositorio completo |
 |---|---:|---:|
-| Archivos `.ts` | 27 | 52 |
-| Lineas | **2 046** | **3 725** |
-| Archivos > 300 lineas | 2 | **2** (corregido en R2) |
+| Archivos `.ts` | 29 (R1/R2: 27) | **54** (R1/R2: 52) |
+| Lineas | **2 100** (R1/R2: 2 046) | **3 796** (R1/R2: 3 725) |
+| Archivos > 300 lineas | 2 | **2** |
 | Errores de compilacion | **0** | **0** |
 | Suites de pruebas | **0** | **0** |
+| Ocurrencias de `any` en el scope | **6** (R1/R2: 4) | **60** |
 
 ### 2.1 Los dos archivos problematicos
 
@@ -79,7 +80,7 @@ Analisis de cada `import` frente al uso real de su simbolo en el cuerpo del arch
 | `create-atraccion.dto.ts` | `Min` | 2 | Importado y nunca usado |
 | `create-atraccion.dto.ts` | `IsNumber` | 2 | Importado y nunca usado |
 
-`create-atraccion.dto.ts:2` importa 12 simbolos de `class-validator`; usa 8. Los 4 restantes son ruido que un linter habria detectado en el primer commit.
+`create-atraccion.dto.ts:2` importa **11** simbolos de `class-validator`; usa **7**. Los 4 restantes (`IsNumber`, `IsPositive`, `IsUrl`, `Min`) son ruido que un linter habria detectado en el primer commit. **Correccion aplicada en R3:** la R1 contaba 12 importados y 8 usados; el recuento real es 11 y 7. La conclusion no cambia.
 
 ### 3.2 El coste oculto de `EntityManager` sin usar
 
@@ -102,7 +103,7 @@ El autor **importo `EntityManager` con la intencion de transaccionar** y luego n
 
 > **Leccion de proceso.** Este es el argumento mas claro del informe a favor del linter: una importacion sin usar no es solo deuda. Es la huella de una intencion de diseno que se quedo a medio camino, y senala exactamente donde esta el defecto de integridad de datos. El coste de un `no-unused-vars` activo es una linea de codigo; el coste de no tenerlo es una perdida de datos en produccion.
 
-### 3.3 `@typescript-eslint/no-explicit-any` — 4 casos (advertencia)
+### 3.3 `@typescript-eslint/no-explicit-any` — 6 casos (advertencia) · **actualizado en R3**
 
 En el scope auditado (`atracciones` + `common`):
 
@@ -112,8 +113,17 @@ En el scope auditado (`atracciones` + `common`):
 | `atracciones.service.ts:287` | `exists.product_type = dto.product_type as any;` | Idem en el reemplazo |
 | `atracciones.service.ts:367` | `if (dto.product_type !== undefined) atraccion.product_type = dto.product_type as any;` | Idem en la actualizacion |
 | `atraccion-response.dto.ts:63` | `_links?: any;` | Tipo `any` en un DTO que alimenta el contrato OpenAPI |
+| **`http-exception.filter.ts:22`** | `(errorResponse as any).message \|\| (errorResponse as any).detail \|\| errorResponse` | **R3.** Acceso a un `unknown` con `as any` en el camino de error |
 
-**Contexto que no debe perderse.** En el repositorio completo hay **60 ocurrencias** de `any`, pero **56 estan en `alojamientos`, `autos` y `vuelos`** — modulos no registrados en `app.module.ts` y cuyos servicios son esqueletos. La calidad del codigo del modulo `atracciones` es netamente superior: 4 frente a 56. Esto confirma que el modulo activo es el trabajo real, y que los otros tres son andamiaje de plantilla.
+**El recuento pasa de 4 a 6.** Los dos nuevos estan en una sola linea del filtro de excepciones y son el precio de no tipar el payload de la excepcion. Un filtro global es **codigo de ruta de error**: se ejecuta precisamente cuando algo ya ha fallado, y no deberia introducir un segundo punto de fallo. La forma correcta sin `any` es `in`-narrowing sobre `Record<string, unknown>`:
+
+```ts
+const body = errorResponse as Record<string, unknown>;
+const detail = typeof body.message === 'string' ? body.message
+  : typeof body.detail === 'string' ? body.detail : errorResponse;
+```
+
+**Contexto que no debe perderse.** En el repositorio completo hay **60 ocurrencias** de `any`, pero **56 estan en `alojamientos`, `autos` y `vuelos`** — modulos no registrados en `app.module.ts` y cuyos servicios son esqueletos. La calidad del codigo del modulo `atracciones` es netamente superior: 6 frente a 56. Esto confirma que el modulo activo es el trabajo real, y que los otros tres son andamiaje de plantilla.
 
 **Sobre los tres `as any` de `product_type`.** Son un sintoma de la duplicacion de enum (§4): hay **dos** declaraciones de `ProductType` —`entities/atraccion.entity.ts:25` y `dto/create-atraccion.dto.ts:6`— con la misma forma de valores. TypeScript los considera tipos **incompatibles** (son tipos nominalmente distintos), asi que el servicio necesita `as any` para asignar uno al otro. Los tres `as any` **desaparecen** al unificar el enum en un unico modulo compartido. Es decir: eliminar 3 `any` y 1 duplicacion son la misma tarea.
 
@@ -182,6 +192,52 @@ export class CommonModule {}
 Un modulo sin providers ni exports, importado tanto por `app.module.ts` como por `atracciones.module.ts`. `IdempotencyKeyGuard` **no esta registrado** en ningun sitio: funciona unicamente porque NestJS puede instanciarlo al vuelo al no tener dependencias inyectables. Es una fragilidad silenciosa: en cuanto el guard necesite un servicio (una tabla de idempotencia, un reloj, un logger), dejara de funcionar sin avisar.
 
 **Correccion:** declarar el guard en `providers` y exportarlo desde `CommonModule`, o marcar `CommonModule` como `@Global()`.
+
+**Actualizacion R3 — L-02.** El diagnostico se confirma y **se agrava**. `common/` ya contiene dos clases nuevas y reales (`ErrorDto` y `HttpExceptionFilter`), y el modulo **sigue completamente vacio**:
+
+```ts
+// src/common/common.module.ts  (sin cambios en R3)
+@Module({ imports: [], providers: [], exports: [] })
+export class CommonModule {}
+```
+
+Ambas se consumen por **ruta de importacion directa**, no por el modulo. Y el filtro se registra de la peor de las dos maneras posibles:
+
+```ts
+// src/main.ts:31
+app.useGlobalFilters(new HttpExceptionFilter());
+```
+
+`new` en lugar del token `APP_FILTER` tiene tres consecuencias concretas:
+
+| Consecuencia | Detalle |
+|---|---|
+| **Sin inyeccion de dependencias** | El filtro no puede recibir `Logger`. Es la causa directa de **H-15**: los 500 no se registran porque no hay forma de registrarlos |
+| **No sustituible en pruebas** | Un `APP_FILTER` se puede reemplazar con `overrideProvider`; un `new` en `main.ts` no |
+| **Fuera del grafo del contenedor** | NestJS no lo conoce: no aparece en el diagrama de dependencias ni en el debugging del framework |
+
+La secuencia tipica de este antipatron es: hoy `new`, manana con dependencias, y el filtro se rompe porque `new` no las admite. La correccion es una linea y se aplica de paso al filtro:
+
+```ts
+// src/common/common.module.ts
+@Module({ providers: [HttpExceptionFilter], exports: [HttpExceptionFilter] })
+export class CommonModule {}
+```
+
+```ts
+// src/common/filters/http-exception.filter.ts
+@Catch()
+export class HttpExceptionFilter implements ExceptionFilter {
+  constructor(private readonly logger: Logger) {}
+  // ...
+}
+```
+
+```ts
+// src/main.ts  (se elimina la linea 31)
+```
+
+Con `APP_FILTER` en `AppModule.providers`, NestJS construye el filtro, inyecta el `Logger` y deja de ser sustituible solo en pruebas.
 
 ### 4.7 Numeros magicos
 
@@ -357,3 +413,56 @@ Ninguno de los cinco anteriores cambia. Los cambios de la R2 introducen dos obse
 | **2** | **Cabeceras obligatorias declaradas por inferencia.** 13 declaraciones `@ApiHeader` eliminadas; el documento sigue exponiendo la cabecera porque NestJS la rederiva de `@Headers(...)` | `/api/docs-json` → `in: header, required: true` sin `description` | `@typescript-eslint/no-unsafe-*` no aplica. Es un hallazgo de **contrato**, registrado como **H-14** / **D-12** |
 
 **Conteo final de la R2:** 5 importaciones muertas · 4 `any` · 2 enums duplicados (5 declaraciones) · 6 bloques no transaccionales · 3 bucles con `await` · 7 `eager: true` · 0 reglas de ORM activas · 0 pruebas. **Sin cambios.**
+
+---
+
+## 8. Revisión 3 — Estado del análisis estático (2026-10-04)
+
+La R3 auditó el commit `a39bfe7` y 5 ficheros modificados + 2 nuevos sin commitear. Resultado: **0 hallazgos de la R1 cerrados, 4 nuevos** (2 altos, 1 medio, 1 bajo en este informe) y **1 correccion de cifra**.
+
+### 8.1 Lo que no ha cambiado (y por qué importa)
+
+**Ningún cambio de la R3 toca `atracciones.service.ts`, las entidades ni los DTOs de negocio.** La nueva dependencia es `helmet`; los ficheros nuevos son un DTO y un filtro; el controlador solo cambia decoradores de documentacion. Por tanto la deuda del nucleo de negocio medida en las R1 y R2 sigue **exactamente igual**:
+
+| Deuda | R1 | R2 | R3 |
+|---|---:|---:|---:|
+| `eager: true` | 7 | **7** | **7** |
+| Bloques de borrado + reescritura sin transaccion | 6 | **6** | **6** |
+| Bucles con `await` | 3 | **3** | **3** |
+| Enums duplicados | 2 / 5 | **2 / 5** | **2 / 5** |
+| `EntityManager` importado y sin usar | 1 | **1** | **1** |
+| Metodos sin tipo de retorno explicito | 6 | **6** | **6** |
+| Importaciones muertas | 5 | **5** | **5** |
+| `as any` en el scope | 4 | **4** | **6** |
+| Suites de pruebas | 0 | **0** | **0** |
+| `.eslintrc*` / `eslint.config.*` / `.prettierrc` | ausentes | **ausentes** | **ausentes** |
+| `eslint` / `prettier` / `jest` en `devDependencies` | no | **no** | **no** |
+| `npm run lint` funcional | no | **no** | **no** |
+
+El plan de 9 pasos del §5 sigue vigente. **El paso 1 —hacer funcional el linter— sigue siendo el primero**, y la R3 lo refuerza: los dos `any` nuevos y el `new HttpExceptionFilter()` fuera del contenedor son exactamente la clase de defecto que un `no-explicit-any` y un analisis de dependencias habrian marcado en el commit.
+
+### 8.2 Correccion de cifra
+
+| Cifra | Valor publicado | Valor real | Origen |
+|---|---:|---:|---|
+| Simbolos de `class-validator` importados en `create-atraccion.dto.ts` | 12 | **11** | Recuento manual erroneo en R1 |
+| Simbolos usados | 8 | **7** | Ídem |
+
+Los 4 no usados (`IsNumber`, `IsPositive`, `IsUrl`, `Min`) y el hallazgo no cambian.
+
+### 8.3 Hallazgos estaticos nuevos
+
+| # | ID | Observacion | Verificacion |
+|---|---|---|---|
+| **1** | **H-15** | **Filtro global sin `Logger` y con `@Catch()` sin argumentos.** `catch()` descarta la excepcion original sin registrarla: un 500 por base de datos sin tablas no deja ni una linea en el log | `grep "QueryFailedError\|42P01\|does not exist"` sobre el log → **0 coincidencias** |
+| **2** | **H-16** | **Capacidad declarada y no usada, segunda vez.** `FRONTEND_URL` se lee con un valor por defecto `'*'` que **anula la propia restriccion que implementa**: con `credentials: true`, el navegador rechaza `origin: '*'`. El mecanismo de seguridad esta, pero desactivado por su propio valor por defecto | `FRONTEND_URL` ausente en `.env` y `.env.example`; respuesta con `ACAO: *` + `ACAC: true` |
+| **3** | **L-02** | **`CommonModule` sigue vacio** pese a que `common/` ya tiene dos clases reales, y el filtro se instancia con `new` en `main.ts` en vez de `APP_FILTER`: sin inyeccion, no sustituible en pruebas, fuera del grafo del contenedor | `common.module.ts` con `providers: []`; `main.ts:31` |
+| **4** | **M-27** | **Configuracion sin documentar.** `.env.example` declara 3 variables; el sistema usa 5. Faltan `DB_SYNCHRONIZE` y `FRONTEND_URL` | `.env.example` vs uso en `app.module.ts:22` y `main.ts:23` |
+
+Los cuatro son **del mismo tipo que los dos de la R2**: algo declarado en el codigo que no cumple su funcion. Los seis forman ya un patron consistente, y es la observation mas util de este informe:
+
+> **El repositorio no tiene un linter, y en consecuencia todo su codigo es invisible a las reglas que detectarian estos defectos.** Los seis casos restantes (versionado sin usar, cabeceras por inferencia, filtro sin logger, CORS desactivado por defecto, modulo vacio, variables sin documentar) son **cosas que un linter no detecta pero un revisor con checklist si**. Son el coste oculto de `npm run lint` roto, y por eso el paso 1 del §5 no es cosmetico.
+
+### 8.4 Lo que la R3 confirma sobre `tsc`
+
+`tsc --noEmit` sigue dando **0 errores** con `as any` en el camino de error del filtro global, con un `@Catch()` que captura excepciones no tipadas y con un `instanceof HttpException` cuyo `else` devuelve un objeto literal no compatible con el tipo de la rama verdadera. Un compilador limpio **no** implica codigo correcto: es la misma tesis del §1.2, ahora con un ejemplo nuevo y en el archivo mas sensible del proyecto.

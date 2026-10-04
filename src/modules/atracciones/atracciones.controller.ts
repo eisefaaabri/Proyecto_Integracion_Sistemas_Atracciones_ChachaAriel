@@ -41,6 +41,7 @@ import {
   CancelReservationRequestDto,
 } from './dto/reservation.dto';
 import { IdempotencyKeyGuard } from '../../common/guards/idempotency-key.guard';
+import { ErrorDto } from '../../common/dto/error.dto';
 
 @ApiTags('Atracciones - Catálogo')
 @Controller('atracciones')
@@ -59,7 +60,7 @@ export class AtraccionesController {
     description: 'Resultados de la búsqueda.',
     type: SearchAtraccionesResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.' })
+  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.', type: ErrorDto })
   async search(@Body() searchDto: SearchAtraccionesDto) {
     return this.atraccionesService.search(searchDto);
   }
@@ -74,7 +75,7 @@ export class AtraccionesController {
     description: 'Detalles de atracciones en los idiomas solicitados.',
     type: SearchAtraccionesResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad Request.' })
+  @ApiResponse({ status: 400, description: 'Bad Request.', type: ErrorDto })
   async getDetailsBatch(@Body() dto: DetailsRequestDto) {
     return this.atraccionesService.getDetailsBatch(dto);
   }
@@ -112,7 +113,7 @@ export class AtraccionesController {
     description: 'Detalle de la reserva.',
     type: ReservationResponseDto,
   })
-  @ApiResponse({ status: 404, description: 'Reserva no encontrada.' })
+  @ApiResponse({ status: 404, description: 'Reserva no encontrada.', type: ErrorDto })
   async getReservationById(
     @Param('reservationId', ParseUUIDPipe) reservationId: string,
   ) {
@@ -135,8 +136,8 @@ export class AtraccionesController {
     description: 'Cancelación procesada.',
     type: ReservationResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad Request.' })
-  @ApiResponse({ status: 404, description: 'Reserva no encontrada.' })
+  @ApiResponse({ status: 400, description: 'Bad Request.', type: ErrorDto })
+  @ApiResponse({ status: 404, description: 'Reserva no encontrada.', type: ErrorDto })
   @ApiResponse({ status: 409, description: 'Conflicto de idempotencia.' })
   async cancelReservation(
     @Param('reservationId', ParseUUIDPipe) reservationId: string,
@@ -176,7 +177,7 @@ export class AtraccionesController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.' })
+  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.', type: ErrorDto })
   async create(
     @Body() createAtraccionDto: CreateAtraccionDto,
     @Res({ passthrough: true }) res: Response,
@@ -201,7 +202,7 @@ export class AtraccionesController {
     description: 'Detalle de la atracción.',
     type: AtraccionResponseDto,
   })
-  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
+  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.', type: ErrorDto })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.atraccionesService.findOne(id);
   }
@@ -216,8 +217,8 @@ export class AtraccionesController {
     format: 'uuid',
   })
   @ApiResponse({ status: 204, description: 'Reemplazo exitoso sin contenido de respuesta.' })
-  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.' })
-  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
+  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.', type: ErrorDto })
+  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.', type: ErrorDto })
   async replace(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreateAtraccionDto,
@@ -238,8 +239,8 @@ export class AtraccionesController {
     description: 'Actualización exitosa.',
     type: AtraccionResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.' })
-  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
+  @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.', type: ErrorDto })
+  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.', type: ErrorDto })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAtraccionDto,
@@ -257,7 +258,7 @@ export class AtraccionesController {
     format: 'uuid',
   })
   @ApiResponse({ status: 204, description: 'Eliminación exitosa sin contenido.' })
-  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
+  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.', type: ErrorDto })
   async remove(@Param('id', ParseUUIDPipe) id: string) {
     await this.atraccionesService.remove(id);
   }
@@ -281,7 +282,7 @@ export class AtraccionesController {
     description: 'Disponibilidad recuperada exitosamente.',
     type: AvailabilityResponseDto,
   })
-  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
+  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.', type: ErrorDto })
   async getAvailability(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('date') date: string,
@@ -305,8 +306,8 @@ export class AtraccionesController {
     description: 'Reserva confirmada.',
     type: ReservationResponseDto,
   })
-  @ApiResponse({ status: 400, description: 'Bad Request.' })
-  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
+  @ApiResponse({ status: 400, description: 'Bad Request.', type: ErrorDto })
+  @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.', type: ErrorDto })
   @ApiResponse({ status: 409, description: 'Conflicto de idempotencia.' })
   async reserve(
     @Param('id', ParseUUIDPipe) id: string,
