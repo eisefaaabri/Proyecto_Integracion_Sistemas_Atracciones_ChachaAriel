@@ -130,11 +130,6 @@ export class AtraccionesController {
     type: 'string',
     format: 'uuid',
   })
-  @ApiHeader({
-    name: 'Idempotency-Key',
-    description: 'UUID v4 para garantizar idempotencia',
-    required: true,
-  })
   @ApiResponse({
     status: 200,
     description: 'Cancelación procesada.',
@@ -304,11 +299,6 @@ export class AtraccionesController {
     description: 'UUID de la atracción',
     type: 'string',
     format: 'uuid',
-  })
-  @ApiHeader({
-    name: 'Idempotency-Key',
-    description: 'UUID v4 para garantizar idempotencia',
-    required: true,
   })
   @ApiResponse({
     status: 201,

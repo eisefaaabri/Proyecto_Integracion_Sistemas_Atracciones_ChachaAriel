@@ -1,8 +1,8 @@
 # Informe 01 — Arquitectura y Rendimiento
 
 **Alcance:** `C:\Proyecto_IS_Atracciones` (API NestJS 10, módulo `atracciones`)
-**Fecha de auditoría:** 2026-09-30
-**Repositorio:** `booking-prototipo-plantilla` v1.0.0 · rama `main` · commit base `0cceeb5`
+**Fecha de auditoría:** 2026-09-30 · **Revisión 2:** 2026-10-04 sobre `a4b4657` + árbol de trabajo sin commitear
+**Repositorio:** `booking-prototipo-plantilla` v1.0.0 · rama `main` · commit base `a4b4657` (R1: `0cceeb5`)
 **Normativa aplicada:** ISO/IEC 25010 (calidad de producto), ISO/IEC 9126-3 (mantenibilidad), ISO/IEC 25010:2011 §8 (eficiencia)
 
 > **Nota de alcance.** El encargo original remitía a un documento rector «CONSTRUCCION DESARROLLO WEB» que no existe en el repositorio. Se auditó contra estándares verificables. El repositorio **no contiene front-end**; la superficie de IHC se trata en el [informe 02](02-accesibilidad-wcag22.md).
@@ -33,7 +33,7 @@
 ### 2.1 Estructura de capas
 
 ```
-HTTP  ──▶  AtraccionesController        (328 loc)   transporte, binding, HATEOAS, cabeceras
+HTTP  ──▶  AtraccionesController        (318 loc)   transporte, binding, HATEOAS, cabeceras
               │  validación declarativa (class-validator + ValidationPipe global)
               ▼
            AtraccionesService           (745 loc)   caso de uso, orquestación, mapeo, helpers
@@ -242,12 +242,12 @@ El impacto de estos índices no es visible todavía porque el dataset de prueba 
 | Sin `@MaxLength` en `name` (`varchar(255)`) | `dto/create-atraccion.dto.ts:14-16` | un nombre de 300 caracteres provoke un 500 de PostgreSQL en vez de un 400 |
 | Sin `@MaxLength` en `duration` (`varchar(50)`) | `dto/create-atraccion.dto.ts:25-26` | idem; y la documentación promete ISO 8601 sin validarlo |
 | `duration` `@IsString()` libre | `dto/create-atraccion.dto.ts:25` | se acepta `"cualquier cosa"`; el contrato afirma «Formato ISO 8601» |
-| `@Query('date') date: string` sin pipe | `atracciones.controller.ts:292` | ni se valida el formato `YYYY-MM-DD` ni se rechaza una fecha pasada |
+| `@Query('date') date: string` sin pipe | `atracciones.controller.ts:287` | ni se valida el formato `YYYY-MM-DD` ni se rechaza una fecha pasada |
 | `SortDto.by` `@IsString()` libre | `dto/search-atracciones.dto.ts:38` | cualquier valor cae silenciosamente al `default` (l. 87) sin error; debería ser `@IsEnum` |
 | `customer_email` opcional sin normalizar | `dto/reservation.dto.ts:24-26` | se aceptan mayúsculas y espacios; no hay unicidad ni verificación de dominio |
-| `enableImplicitConversion: true` global | `main.ts:19` | combinado con `@IsNumber()` sin `type` explícito, Swagger infiera el tipo de forma incorrecta y `class-transformer` puede coercionar `"abc"` a `NaN` antes de validar |
+| `enableImplicitConversion: true` global | `main.ts:23` | combinado con `@IsNumber()` sin `type` explícito, Swagger infiera el tipo de forma incorrecta y `class-transformer` puede coercionar `"abc"` a `NaN` antes de validar |
 
-**Lo que sí está bien resuelto:** el `ValidationPipe` global con `whitelist`, `forbidNonWhitelisted` y `transform` (`main.ts:13-22`) es una configuración correcta y estricta — rechaza campos no declarados, lo que impide *mass assignment*. ✅
+**Lo que sí está bien resuelto:** el `ValidationPipe` global con `whitelist`, `forbidNonWhitelisted` y `transform` (`main.ts:17-26`) es una configuración correcta y estricta — rechaza campos no declarados, lo que impide *mass assignment*. ✅
 
 ---
 
@@ -297,7 +297,7 @@ Indices (§3.6) · logger + `X-Request-Id` + métricas · healthcheck real · su
 
 | ID | Severidad | Hallazgo | Evidencia | Empirical |
 |---|---|---|---|---|
-| C-01 | Crítica | Sin autenticación ni autorización | `main.ts:11`, `atracciones.controller.ts` | ✅ `POST` devolvió 201 sin token |
+| C-01 | Crítica | Sin autenticación ni autorización | `main.ts:15`, `atracciones.controller.ts` | ✅ `POST` devolvió 201 sin token |
 | C-02 | Crítica | IDOR en historial de reservas | `atracciones.service.ts:575-580` | por inspección |
 | C-03 | Crítica | Sobreventa de cupos | `atracciones.service.ts:469, 483-531` | ✅ 297 tickets sobre capacidad 100 |
 | C-04 | Crítica | Carrera TOCTOU en idempotencia | `atracciones.service.ts:488-529` | por inspección |
@@ -311,7 +311,113 @@ Indices (§3.6) · logger + `X-Request-Id` + métricas · healthcheck real · su
 | H-07 | Alta | Token de paginación no firmado | `atracciones.service.ts:95-113` | por inspección |
 | H-08 | Alta | `Content-Type` de error no conforme | `main.ts` sin filtro global | ✅ `application/json` |
 | H-09 | Alta | `synchronize` activo sin `NODE_ENV` | `app.module.ts:22` | por inspección |
-| H-10 | Alta | Cabecera de deprecación en endpoints vivos | `atracciones.controller.ts:159, 195` | por inspección |
+| H-10 | Alta | Cabecera de deprecación en endpoints vivos | `atracciones.controller.ts:154, 190` | por inspección |
 | H-11 | Alta | Paginación contrato ≠ código | `atracciones-openapi.yaml:107-117` | por inspección |
 | H-12 | Alta | `_links` obligatorio y ausente | `paginated-response.dto.ts:17` | ✅ ausente en la respuesta |
 | H-13 | Alta | Sin pruebas automatizadas | `package.json` | ✅ verificado ausente |
+
+### 7.1 Hallazgos de la Revisión 2 (2026-10-04)
+
+| ID | Severidad | Hallazgo | Ubicación | Empirical |
+|---|---|---|---|---|
+| **H-14** | Alta | La cabecera obligatoria `Idempotency-Key` pasa a depender de la introspección de NestJS y pierde su descripción en el contrato publicado | 4 controladores, 13 declaraciones (sin commitear) | ✅ `in: header, required: true` sin `description` |
+| **M-21** | Media | `info.description` publica dos afirmaciones falsas: errores RFC 7807 y `Idempotency-Key` obligatorio | `src/main.ts:30-37` | ✅ contradicho por H-08 y H-14 |
+| **M-22** | Media | Versionado nativo correcto pero global: 0 anotaciones `@Version()` y sin `servers` en el documento | `src/main.ts:9-13` | ✅ `/api/v1` 200, `/api` y `/api/v2` 404 |
+| **M-23** | Media | `feat!` con salto global de versión revertido sin ruta de deprecación; migraciones no cableadas | `b883d9c` → `a4b4657` | ✅ esquema `uuid` intacto, sin `src/migrations/` |
+
+---
+
+## 8. Revisión 2 — Cambios de arquitectura (2026-09-30 → 2026-10-04)
+
+La Revisión 2 auditó 4 commits (`d2ef09c`, `b83a884`, `b883d9c`, `a4b4657`) y 4 controladores modificados sin commitear, y reverificó las comprobaciones ejecutables contra el servicio en marcha. Resultado: **0 hallazgos cerrados y 4 nuevos** (1 alto, 3 medios).
+
+### 8.1 Qué se ha modificado
+
+| Commit / cambio | Archivo | Efecto arquitectónico |
+|---|---|---|
+| `d2ef09c` | `docs/auditoria/**` | Ninguno sobre el sistema |
+| `b83a884` | `src/main.ts` (+6 −2) | **Versionado nativo de NestJS**: `setGlobalPrefix('api')` + `enableVersioning({ type: URI, defaultVersion: '1' })` |
+| `b883d9c` | 9 archivos (+116 −22) | `feat!` UUID→varchar con prefijo `ATR_`, salto a `v2`, `data-source.ts` y migración de 77 líneas |
+| `a4b4657` | 9 archivos (−22 +116) | **Revert total** de `b883d9c`, 21 minutos después |
+| Sin commit | 4 controladores (−21) | Eliminación de 13 declaraciones `@ApiHeader('Idempotency-Key')` |
+
+**Ningún commit toca `atracciones.service.ts`, las entidades, los DTOs ni el contrato YAML.** Por eso **los 5 hallazgos críticos y los 13 altos de la Revisión 1 siguen exactamente como se describieron**: el servicio continúa sin autenticación, sin control de capacidad y sin transacciones, y las 7 relaciones mantienen `eager: true`.
+
+### 8.2 El versionado nativo: correcto, con tres acoplamientos
+
+Es un cambio de arquitectura **acertado**. Antes la versión viajaba dentro de una cadena de texto del prefijo global; ahora es una propiedad del framework con soporte propio.
+
+Verificado contra el servicio en ejecución:
+
+| Comprobación | Resultado |
+|---|---|
+| `GET /api/atracciones` (sin versión) | **404** — ya no existe |
+| `GET /api/v1/atracciones` | **200** — URL pública idéntica |
+| `GET /api/v2/atracciones` | **404** — no hay v2 |
+| `GET /api/docs` | **200** — la documentación no se versiona |
+
+Al no cambiar las URLs efectivas, **no hay ruptura para los clientes** y se cumple la convivencia exigida en el §5.2 del [informe 03](03-contrato-openapi-ssot.md). Se registra como punto positivo.
+
+Los tres acoplamientos que deja (M-22, D-13):
+
+1. **`_links` escritos a mano.** El mapper construye los enlaces con el literal `/api/v1/` (`atracciones.service.ts:707-723`). Coincide con la configuración **por casualidad**. Si `defaultVersion` pasa a `'2'`, los enlaces del catálogo seguirán apuntando a `/api/v1` y no lo detectará nadie: ni el compilador, ni las pruebas (no hay), ni el contrato. La configuración de versionado y la presentación HATEOAS deben derivar del mismo origen.
+2. **Versionado global y no declarado.** Hay **0 anotaciones `@Version()`**. Todo depende del valor por defecto, así que un controlador nuevo hereda `v1` sin que el código lo exprese. La versión es una decisión de diseño y debe poder leerse en el código.
+3. **`servers` ausente en el documento.** No se declara el host base `/api/v1`, de modo que un generador de clientes asumirá `/`. Corrección de una línea: `.addServer('/api/v1')`.
+
+### 8.3 El `feat!` revertido: por qué casi fue un incidente de datos
+
+El commit `b883d9c` (09:50) migraba las claves primarias de `uuid` a `varchar` con prefijo `ATR_` y saltaba la ruta a `v2`. Fue revertido a las 10:11.
+
+**Estado verificado tras el revert:** limpio. Las entidades vuelven a `@PrimaryGeneratedColumn('uuid')`, no existe `src/data-source.ts`, no existe `src/migrations/`, y en PostgreSQL `atracciones.id :: uuid` con default `uuid_generate_v4()` y valores UUID reales.
+
+Lo que importa es la causa de fondo: **el repositorio no tiene migraciones cableadas**. No hay `data-source.ts` ni array `migrations` en `TypeOrmModule.forRootAsync`, luego ninguna migración puede ejecutarse y **el único mecanismo de evolución de esquema es el sincronizador automático**.
+
+Consecuencia concreta: si el servidor de desarrollo hubiera estado en ejecución durante esos 21 minutos, `synchronize` habría convertido `uuid` → `varchar` sobre tablas con datos reales, y el revert habría necesitado convertir valores `ATR_xxx` de vuelta a `uuid`, una transformación que PostgreSQL no realiza de forma implícita. **La integridad de los datos dependía de que nadie estuviera mirando en ese momento.** Es la demostración empírica del riesgo **H-09**, y por eso la recomendación de cablear migraciones versionadas deja de ser una mejora de higiene: es un requisito para poder cambiar el esquema.
+
+El segundo aprendizaje es de gobierno: la etiqueta `feat!` es correcta, pero un cambio que altera la URL de **todas** las operaciones públicas exige `X-API-Deprecation-Date` + `Sunset` + convivencia de `v1` y `v2` durante un periodo acordado (§5.5 del [informe 03](03-contrato-openapi-ssot.md)). Aquí no lo hubo: fue un salto global de prefijo. El revert evitó el daño por decisión, no por proceso.
+
+### 8.4 La cabecera `Idempotency-Key` en la capa de contrato (H-14)
+
+Eliminados 13 `@ApiHeader` en 4 controladores. El efecto real, verificado:
+
+| Extremo | Efecto en el documento publicado |
+|---|---|
+| `POST /atracciones/{id}/reservations` y `POST /atracciones/reservations/{id}/cancel` | NestJS **rederiva** la cabecera desde `@Headers('Idempotency-Key')`, de modo que sigue apareciendo como `in: header, required: true`. **Se pierde la descripción** y el nombre pasa a minúsculas frente al `Idempotency-Key` del YAML |
+| `alojamientos`, `autos`, `vuelos` | La cabecera **desaparece por completo**: en `vuelos.controller.ts` hay 5 lecturas de `@Headers('Idempotency-Key')`, **0 guards**, y handlers esqueleto que devuelven `{}` sin usar el valor |
+
+El hallazgo no es la eliminación en sí, sino que **el contrato publicado pasa a depender de un detalle de implementación del framework** en lugar de una declaración explícita. Si alguien cambia la forma de leer la cabecera, el documento pierde un parámetro **obligatorio** sin que ninguna prueba ni el compilador lo detecten, mientras el YAML —SSOT declarado— seguiría exigiéndolo.
+
+### 8.5 La descripción del API afirma dos cosas falsas (M-21)
+
+`src/main.ts:30-37` se publica como descripción autoritativa:
+
+| Afirmación publicada | Realidad verificada |
+|---|---|
+| «Los errores siguen el estándar RFC 7807 (application/problem+json)» | Los errores se sirven en `application/json; charset=utf-8` (**H-08**) |
+| «Todos los endpoints transaccionales exigen la cabecera `Idempotency-Key` (UUID v4)» | El guard solo valida **formato** cuando se usa, la cabecera no se valida en el servicio (**C-04**) y 3 endpoints la leen sin usar (**H-14**) |
+
+Es el hallazgo que no proviene de un cambio, sino de una omisión: **la descripción se escribió como intención de diseño y se publicó sin verificarla**. Un consumidor de la documentación recibe garantías que el sistema no cumple.
+
+### 8.6 Verificaciones sin cambio
+
+| Comprobación | R1 | R2 |
+|---|---|---|
+| `tsc --noEmit` | 0 errores | **0 errores** |
+| `nest build` | correcto | **correcto** |
+| Operaciones en el documento generado | 14 | **14** |
+| Operaciones con `security` | 0 | **0** |
+| CORS en `main.ts:15` | `*` | **`*`** |
+| Migraciones cableadas | no | **no** |
+| Suites de pruebas | 0 | **0** |
+| Linting funcional | no | **no** |
+
+### 8.7 Métricas de código actualizadas
+
+| Métrica | R1 | R2 |
+|---|---:|---:|
+| Archivos `.ts` del repositorio | 52 | **52** |
+| Líneas del repositorio | 3 742 | **3 725** |
+| Líneas del alcance auditado | 2 056 | **2 046** |
+| `atracciones.service.ts` | 745 | **745** (sin cambios) |
+| `atracciones.controller.ts` | 328 | **318** (−10, por H-14) |
+| `main.ts` | 59 | **61** (+2, por el versionado) |

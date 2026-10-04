@@ -1,8 +1,11 @@
-﻿# Informe 03 — Contrato OpenAPI, Fuente Unica de Verdad y Versionado
+# Informe 03 — Contrato OpenAPI, Fuente Unica de Verdad y Versionado
 
 **Objeto:** `contracts/atracciones-openapi.yaml` (872 lineas, 23 648 bytes) frente a la implementacion NestJS.
-**Fecha:** 2026-09-30
+**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04 sobre `a4b4657`
 **Normativa:** OpenAPI Specification 3.0.3 · RFC 7807 (problem+json) · Semantic Versioning 2.0.0 · HTTP Semantics (RFC 9110)
+
+> **Resultado de la Revision 2: 0 hallazgos cerrados, 2 divergencias nuevas (D-12, D-13).**
+> El contrato YAML **no ha sido modificado** y sus tres defectos principales siguen intactos: las claves duplicadas de `/atracciones/{id}` (**C-05**, verificado de nuevo por parser), la paginacion `offset` frente a `page` (**D-02**) y la ausencia de `servers`. Lo que ha cambiado es el codigo, y en dos direcciones opuestas: el **versionado nativo** (positivo, ver §5.4) y la **eliminacion de `@ApiHeader('Idempotency-Key')`** en 10 endpoints, que introduce **D-12**. La divergencia D-01 (`security` en 0 de 14 operaciones) se ha reverificado sin cambios.
 
 ---
 
@@ -18,7 +21,7 @@
 | Endpoints **efectivos** tras resolver duplicados | **13** |
 | Operaciones con `security` en el YAML | 11 |
 | Operaciones con `security` en la doc generada | **0 / 14** |
-| Divergencias contrato vs codigo | **11** |
+| Divergencias contrato vs codigo | **13** (11 en R1 + D-12, D-13 en R2) |
 | Politica de versionado documentada | No |
 | Politica de compatibilidad hacia atras | No |
 | Cumplimiento de RFC 7807 en el `Content-Type` | No |
@@ -96,13 +99,15 @@ Tabla de conformance. «Verificacion» indica como se obtuvo la evidencia.
 | D-02 | `GET /atracciones?limit=&offset=` | `PaginationQueryDto` expone `page` y `limit`; `offset` no existe | `atracciones-openapi.yaml:107-117` vs `common/dto/pagination-query.dto.ts` | por inspeccion |
 | D-03 | `PaginatedAtraccionResponse` | `findAll()` devuelve `{data, meta}` **sin `_links`**, y el DTO lo marca obligatorio | `common/dto/paginated-response.dto.ts:17` | **Empirica:** respuesta real sin la propiedad |
 | D-04 | Errores en `application/problem+json` | Respuestas en `application/json`; sin filtro global de excepciones | `src/main.ts` | **Empirica:** `Content-Type: application/json; charset=utf-8` |
-| D-05 | `ProblemDetails` con `type`/`title`/`status`/`detail`/`instance` | El `ValidationPipe` devuelve `{statusCode, message[], error}`: esquema distinto | `src/main.ts:13-22` | por inspeccion |
+| D-05 | `ProblemDetails` con `type`/`title`/`status`/`detail`/`instance` | El `ValidationPipe` devuelve `{statusCode, message[], error}`: esquema distinto | `src/main.ts:17-26` | por inspeccion |
 | D-06 | `UpdateAtraccionRequest` (objeto vacio, sin propiedades) | `PartialType(CreateAtraccionDto)`: 13 campos opcionales | `atracciones-openapi.yaml:744-746` | por inspeccion |
-| D-07 | Scopes `attractions:read/book/write/webhooks` | `attractions:read/book/write/cancel` (`main.ts:45`); `attractions:cancel` **no existe** en el YAML y `attractions:webhooks` **no existe** en el codigo | `atracciones-openapi.yaml:515-519` vs `src/main.ts:41-46` | por inspeccion |
+| D-07 | Scopes `attractions:read/book/write/webhooks` | `attractions:read/book/write/cancel` (`main.ts:45`); `attractions:cancel` **no existe** en el YAML y `attractions:webhooks` **no existe** en el codigo | `atracciones-openapi.yaml:515-519` vs `src/main.ts:39-53` | por inspeccion |
 | D-08 | `/atracciones/details` devuelve detalles «en los idiomas solicitados» | `dto.languages` se recibe y **se ignora por completo** | `atracciones.service.ts:122-132` | por inspeccion |
 | D-09 | `SearchAtraccionesRequest.cities` (obligatorio) | Se valida y **se ignora**; no hay ninguna condicion sobre `cities` | `atracciones.service.ts:46-120` | **Empirica:** `cities:[999999,888888]` devolvio `total_results: 2` |
 | D-10 | `SearchAtraccionesRequest.dates` (obligatorio) | Se valida y **se ignora**; no hay filtro por fecha | idem | **Empirica:** `dates: 1900-01-01` devolvio resultados |
 | D-11 | `SearchAtraccionesRequest.currency` (obligatorio) | Se valida y **se ignora**; no hay conversion de moneda | idem | por inspeccion |
+| **D-12** | Alta | `Idempotency-Key` sin descripcion y dependiente de la introspeccion; ausente en 3 modulos | `atracciones.controller.ts`; yaml:318, 358 | **Empirica** (R2) |
+| **D-13** | Media | Doble eje de version sin relacion; `servers` no declarado; 0 anotaciones `@Version()` | `src/main.ts:9-13, 38` | **Empirica** (R2) |
 
 ### 3.1 D-09 / D-10: el hallazgo con mayor impacto de negocio
 
@@ -163,15 +168,17 @@ throw new NotFoundException({
 | Elemento | Estado | Evidencia |
 |---|---|---|
 | Version en el contrato | `1.2.0` (linea 18) | unica declaracion |
-| Version en el codigo | `1.2.0` | `src/main.ts:34`, `.setVersion('1.2.0')` — **coincide**, lo cual es meritorio |
-| Version en la URL | `api/v1` | `src/main.ts:9`, `setGlobalPrefix('api/v1')` — **coincide** |
-| Endpoint de version | **No existe** | grep: ninguna ruta de version |
+| Version en el codigo | `1.2.0` | `src/main.ts:38`, `.setVersion('1.2.0')` — **coincide**, lo cual es meritorio |
+| Version en la URL | `api` + version URI `1` → `api/v1` | `src/main.ts:9-13`, `setGlobalPrefix('api')` + `enableVersioning({ defaultVersion: '1' })` — **coincide** (Revision 2) |
+| Endpoint de version | **No existe** | grep: ninguna ruta que exponga la version |
+| Anotaciones `@Version()` | **0** | Todo el versionado es global por defecto; ningun controlador declara su version |
+| `servers` en el documento | **No declarado** | El consumidor debe deducir el host base; el documento no dice `/api/v1` |
 | `CHANGELOG.md` | **No existe** | no hay historial de cambios documentado |
 | Git tags | **No hay** | `git tag` sin salida |
 | Politica escrita | **No existe** | ninguna documentacion la declara |
 | Cabecera `Deprecation` / `Sunset` | **Mal aplicada** | ver 5.3 |
 
-> La version esta declarada de forma **coherente en tres sitios**, lo cual es el principio correcto. Lo que falta es todo lo demas: no hay forma de consultar que version se sirve, ni registro de que cambio entre versiones, ni politica que diga que se puede romper.
+> La version **de ruta** esta declarada de forma coherente, y desde `b83a884` por un mecanismo mas correcto (versionado nativo de NestJS). Pero ahora hay **dos ejes de version independientes**: el `1` de la ruta y el `1.2.0` del documento. Nada los relaciona, nada verifica que coincidan y nada obliga a que coincidan: el commit `b883d9c` pretendio mover la ruta a `v2` dejando el documento en `1.2.0`, y habria producido exactamente esa incoherencia (ver 5.4). Lo que falta sigue siendo todo lo demas: no hay forma de consultar que version se sirve, ni registro de cambios, ni politica que diga que se puede romper.
 
 ### 5.2 Versionado dual por URL — decision a confirmar
 
@@ -187,7 +194,7 @@ La API usa `api/v1` en la ruta. Con SemVer, conviene fijar por escrito cual de l
 ### 5.3 Hallazgo H-10 — Cabecera de deprecacion en endpoints vivos
 
 ```ts
-// atracciones.controller.ts:159 y :195
+// atracciones.controller.ts:154 y :190  (Revision 2; antes :159 y :195)
 @Header('X-API-Deprecation-Date', '2027-12-31')
 ```
 
@@ -197,7 +204,50 @@ Se aplica a `GET /atracciones` y a `GET /atracciones/{id}`: los dos endpoints **
 
 No hay ninguna justificacion visible para marcar como deprecado lo que no lo esta. **Correccion:** eliminar ambas cabeceras hasta que exista una deprecacion real, o documentar la decision si la hay.
 
-### 5.4 Politica de compatibilidad hacia atras — a adoptar
+### 5.4 Revision 2 — El versionado nativo y el `feat!` revertido
+
+#### 5.4.1 `b83a884`: versionado nativo (cambio correcto)
+
+```diff
+- app.setGlobalPrefix('api/v1');
++ app.setGlobalPrefix('api');
++ app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+```
+
+Verificado contra el servicio en ejecucion:
+
+| Peticion | Respuesta | Lectura |
+|---|---:|---|
+| `GET /api/atracciones` | **404** | Ya no existe ruta sin version |
+| `GET /api/v1/atracciones` | **200** | La URL publica no cambia |
+| `GET /api/v2/atracciones` | **404** | No hay v2 |
+| `GET /api/docs` | **200** | La documentacion no se versiona |
+
+**Es el cambio correcto y no rompe nada:** las URLs efectivas son identicas, luego no hay ruptura para los clientes, y a partir de ahora NestJS puede convivir `v1` y `v2` en paralelo — que es exactamente el requisito que §5.2 pedia. Seستablece como **punto positivo**.
+
+Lo que deja pendientes (D-13):
+
+1. **`servers` sin declarar.** El documento no dice que el host base es `/api/v1`. Un generador de clientes asumira `/`. Medida: `.addServer('/api/v1')`.
+2. **0 anotaciones `@Version()`.** Todo depende del valor global. Un controlador nuevo hereda `v1` sin que el codigo lo diga. Deberia anotarse explicitamente cada controlador, aunque sea `@Version('1')`.
+3. **`_links` escritos a mano.** El mapper construye los enlaces con el literal `/api/v1/` (`service:707-723`). Coincide con la configuracion **por casualidad**. Si `defaultVersion` pasa a `'2'`, los enlaces del catalogo seguiran apuntando a `/api/v1` y nada lo detectara: ni el compilador, ni las pruebas (no hay), ni el contrato. Medida: derivar el prefijo de la configuracion de versionado.
+
+#### 5.4.2 `b883d9c` → `a4b4657`: un `feat!` revertido en 21 minutos
+
+El commit `feat!: refactorizar UUID nativo a varchar con prefijo ATR_ y salto a v2` (09:50) fue revertido a las 10:11. Anadio `data-source.ts`, una migracion de 77 lineas, cambios en 5 entidades y el salto de `defaultVersion` a `'2'`.
+
+**Estado verificado tras el revert:** limpio. Entidades con `@PrimaryGeneratedColumn('uuid')`, sin `data-source.ts`, sin `src/migrations/`, y en PostgreSQL `atracciones.id :: uuid` con default `uuid_generate_v4()` y valores UUID reales.
+
+Tres lecturas que importan mas que el commit en si:
+
+| # | Lectura |
+|---|---|
+| 1 | **La etiqueta `feat!` es correcta, el proceso no.** Un cambio que rompe la URL de todas las operaciones publicas exige, por §5.5, `X-API-Deprecation-Date` + `Sunset` + convivencia de v1 y v2 durante un periodo acordado. Lo que se hizo fue un salto global de prefijo. El revert evita el dano, pero no porque hubiera un plan de deprecacion, sino porque se arrepintieron 21 minutos despues |
+| 2 | **Se escribieron 77 lineas de migracion que nunca pueden ejecutarse.** No por decision tecnica: **las migraciones no estan cableadas** (no hay `data-source.ts` ni array `migrations` en `TypeOrmModule.forRootAsync`). Mientras no se cableen, la recomendacion H-09 sigue enteramente pendiente y cualquier cambio de esquema depende de `synchronize: true` |
+| 3 | **El cambio de esquema era una operacion en caliente sobre datos reales.** Si el servidor de desarrollo hubiera estado en ejecucion durante esos 21 minutos, `synchronize` habria convertido `uuid` → `varchar` sobre tablas con datos, y el revert habria necesitado convertir valores `ATR_xxx` de vuelta a `uuid`: PostgreSQL no hace esa conversion de forma implicita. **La integridad de los datos habria dependido de que nadie estuviera mirando.** Es la demostracion empirica del riesgo H-09 |
+
+**Medidas que se desprenden:** cablear el runner de migraciones (`typeorm migration:run`) antes de permitir cualquier cambio de esquema; y vetar por revision de codigo todo `!` que toque la ruta sin `Sunset` y sin periodo de convivencia.
+
+### 5.5 Politica de compatibilidad hacia atras — a adoptar
 
 Se propone el siguiente texto normativo, para incorporar a `info.description` del contrato y al `README.md`:
 
@@ -340,7 +390,7 @@ Dos niveles, ambos baratos:
 
 **Nivel 1 — el contrato manda (recomendado).** Generar los DTOs y los controladores desde el YAML con `openapi-generator` / `@asteasolutions/zod-to-openapi`, y validar en CI que el `openapi.json` producido por NestJS es **identico** al YAML. Si divergen, la CI falla.
 
-**Nivel 2 — conformance por comparacion.** Script en CI que diffree el `document` de `SwaggerModule.createDocument` contra `contracts/atracciones-openapi.yaml` y falle ante cualquier diferencia de rutas, metodos, codigos de estado, esquemas o `security`. Es menos ambicioso, pero convierte las 11 divergencias detectadas hoy en un fallo de construccion permanente.
+**Nivel 2 — conformance por comparacion.** Script en CI que diffree el `document` de `SwaggerModule.createDocument` contra `contracts/atracciones-openapi.yaml` y falle ante cualquier diferencia de rutas, metodos, codigos de estado, esquemas o `security`. Es menos ambicioso, pero convierte las 13 divergencias detectadas hoy en un fallo de construccion permanente.
 
 Ademas: `no-dupe-keys` de Spectral, que habria detectado C-05 en el momento del commit.
 
@@ -355,7 +405,7 @@ Ademas: `no-dupe-keys` de Spectral, que habria detectado C-05 en el momento del 
 | `contracts/alojamientos-openapi.yaml` | 32,6 KB | No (`AlojamientosModule` no registrado) | **No** |
 | `contracts/vuelos-openapi.yaml` | 44,7 KB | Parcial: `vuelos.service.ts` tiene 307 B, sin implementar | **No** |
 
-**Riesgo para la integracion entre equipos.** El README instruye a «descomentar UNICAMENTE el modulo asignado a tu equipo». Si dos equipos cumplen a la vez, `app.module.ts` acaba con varios modulos y `autoLoadEntities: true` (`src/main.ts:21`) registra las entidades de todos ellos. Si dos de esos modulos definen entidades con nombres de tabla homonimos, TypeORM falla en el arranque con un error de metadatos duplicados; si los nombres coinciden pero los esquemas difieren, el fallo es mas dificil de diagnosticar. **No hay ningun test de arranque con los cuatro modulos activos**, precisamente el escenario que el README describe.
+**Riesgo para la integracion entre equipos.** El README instruye a «descomentar UNICAMENTE el modulo asignado a tu equipo». Si dos equipos cumplen a la vez, `app.module.ts` acaba con varios modulos y `autoLoadEntities: true` (`src/app.module.ts:21`; la referencia a `main.ts:21` de la Revision 1 era erronea) registra las entidades de todos ellos. Si dos de esos modulos definen entidades con nombres de tabla homonimos, TypeORM falla en el arranque con un error de metadatos duplicados; si los nombres coinciden pero los esquemas difieren, el fallo es mas dificil de diagnosticar. **No hay ningun test de arranque con los cuatro modulos activos**, precisamente el escenario que el README describe.
 
 Recomendacion: un test de integracion que registre los cuatro modulos simultaneamente y verifique que el arranque es limpio. Es la prueba mas barata que evita el peor incidente de integracion posible.
 
@@ -365,19 +415,25 @@ Recomendacion: un test de integracion que registre los cuatro modulos simultanea
 
 | ID | Severidad | Hallazgo | Ubicacion | Verificacion |
 |---|---|---|---|---|
-| C-01 | Critica | Sin autenticacion pese a OAuth2 declarado | `src/main.ts:11` | **Empirica:** POST → 201 sin token; `security` 0/14 |
+| C-01 | Critica | Sin autenticacion pese a OAuth2 declarado | `src/main.ts:15` | **Empirica:** POST → 201 sin token; `security` 0/14 |
 | C-05 | Critica | Claves YAML duplicadas; `GET /{id}` ausente | `atracciones-openapi.yaml:160, 383` | **Empirica:** parser → `['delete','patch','put']` |
 | D-01 | Critica | `security` en 0 de 14 operaciones generadas | idem | **Empirica** |
 | D-02 | Alta | Paginacion `offset` vs `page` | yaml:107-117 | por inspeccion |
 | D-03 | Alta | `_links` obligatorio y ausente | `paginated-response.dto.ts:17` | **Empirica** |
 | D-04 | Alta | `Content-Type` incorrecto para errores | `src/main.ts` | **Empirica** |
-| D-05 | Alta | Errores de validacion fuera de `ProblemDetails` | `src/main.ts:13-22` | por inspeccion |
+| D-05 | Alta | Errores de validacion fuera de `ProblemDetails` | `src/main.ts:17-26` | por inspeccion |
 | D-06 | Alta | `UpdateAtraccionRequest` vacio | yaml:744-746 | por inspeccion |
 | D-07 | Alta | Scopes divergentes entre YAML y codigo | yaml:515-519 | por inspeccion |
 | D-08 | Alta | `dto.languages` ignorado | `service:122-132` | por inspeccion |
 | D-09 | Alta | `cities` ignorado | `service:46-120` | **Empirica** |
 | D-10 | Alta | `dates` ignorado | `service:46-120` | **Empirica** |
 | D-11 | Alta | `currency` ignorado | `service:46-120` | por inspeccion |
-| H-10 | Alta | Cabecera de deprecacion en endpoints vivos | `controller:159, 195` | por inspeccion |
+| H-10 | Alta | Cabecera de deprecacion en endpoints vivos | `controller:154, 190` | por inspeccion |
 | M-15 | Media | Ninguna operacion tiene `operationId` | yaml (global) | por inspeccion |
 | M-16 | Media | Sin politica SemVer ni CHANGELOG | repo | por inspeccion |
+| **D-12** | Alta | `Idempotency-Key` sin descripcion y dependiente de la introspeccion; ausente en 3 modulos | `atracciones.controller.ts`; yaml:318, 358 | **Empirica** (R2) |
+| **D-13** | Media | Doble eje de version sin relacion; `servers` no declarado; 0 anotaciones `@Version()` | `src/main.ts:9-13, 38` | **Empirica** (R2) |
+| **H-14** | Alta | Cabecera obligatoria expuesta por detalle de implementacion de NestJS | 4 controladores, 13 declaraciones (sin commit) | **Empirica** (R2) |
+| **M-21** | Media | `info.description` afirma RFC 7807 y `Idempotency-Key` obligatorio: ambas cosas son falsas | `src/main.ts:30-37` | **Empirica** (R2) |
+| **M-22** | Media | Versionado nativo correcto, pero global y sin `servers` | `src/main.ts:9-13` | **Empirica** (R2) |
+| **M-23** | Media | `feat!` con salto de version global revertido sin ruta de deprecacion; migraciones no cableadas | commits `b883d9c`/`a4b4657` | **Empirica** (R2) |

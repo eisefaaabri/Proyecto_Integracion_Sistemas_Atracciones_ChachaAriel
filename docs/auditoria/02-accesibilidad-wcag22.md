@@ -1,9 +1,11 @@
-﻿# Informe 02 — Auditoria de Interaccion Humano-Computador y Accesibilidad
+# Informe 02 — Auditoria de Interaccion Humano-Computador y Accesibilidad
 
 **Alcance:** la unica interfaz de usuario existente en el repositorio, mas la especificacion de requisitos de accesibilidad que el contrato OpenAPI impone al front-end pendiente.
-**Fecha:** 2026-09-30
+**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04 sobre `a4b4657` (remedicion de A-7 y reverificacion de A-1 a A-5)
 **Normativa:** WCAG 2.2 nivel AA (W3C Recommendation, octubre 2023) · EN 301 549:2022 · ISO 9241-210:2019
 **Metodo:** inspeccion del HTML servido, medicion real de recursos, verificacion de cabeceras HTTP. Todas las cifras proceden de peticiones HTTP reales, no de estimaciones.
+
+**Resultado de la Revision 2 (2026-10-04, commit `a4b4657`):** **0 hallazgos nuevos y 0 cerrados.** El commit `b83a884` (versionado nativo) no altera la interfaz: `/api/docs` sigue en la misma ruta y se sigue sirviendo con 3 126 B de HTML, `lang="en"`, sin `meta viewport`, sin compresion y con 0 de 8 cabeceras de seguridad. Los hallazgos **A-01 a A-06 permanecen abiertos**; solo se ha remedido A-06 (1 884 754 → **1 884 202 B**). La eliminacion de `@ApiHeader('Idempotency-Key')` en los controladores afecta al **contenido** del documento, no a su marcado: el formulario «Try it out» de los 2 endpoints de reserva deja de mostrar la descripcion de la cabecera, lo que es un problema de **contenidoAccessible** y se registra como **H-14** en el [informe 01](01-arquitectura-y-rendimiento.md), no como un incumplimiento de WCAG.
 
 ---
 
@@ -16,7 +18,7 @@ Busqueda de *.html *.css *.scss *.jsx *.tsx *.vue *.svelte
 (excluyendo node_modules y dist)  ->  0 resultados
 ```
 
-La unica superficie de IHC es la documentacion interactiva generada por `SwaggerModule.setup('api/docs', ...)` en `src/main.ts:53`, servida por el propio backend.
+La unica superficie de IHC es la documentacion interactiva generada por `SwaggerModule.setup('api/docs', ...)` en `src/main.ts:57`, servida por el propio backend. (La cifra de linea corresponde a la Revision 2: el commit `b83a884` shiftingo el `SwaggerModule.setup` de la linea 53 a la 57.)
 
 **Consecuencia metodologica.** Auditar "diseno responsivo mobile-first con tres breakpoints", "principios Gestalt" o "semantica WAI-ARIA" sobre una pagina que no existe seria inventar hallazgos. Este informe hace dos cosas y solo dos:
 
@@ -123,7 +125,7 @@ Verificado con `curl -D -` sobre la respuesta de `/api/docs`:
 | `Referrer-Policy` | AUSENTE | Fuga de la URL de documentacion a terceros. |
 | `Permissions-Policy` | AUSENTE | Sin restriccion de APIs de navegador. |
 | `X-Powered-By: Express` | PRESENTE | Divulga la pila tecnologica. |
-| `Access-Control-Allow-Origin: *` | PRESENTE | `app.enableCors()` sin restriccion de origen (`src/main.ts:11`). |
+| `Access-Control-Allow-Origin: *` | PRESENTE | `app.enableCors()` sin restriccion de origen (`src/main.ts:15`, antes `:11`). |
 
 **Causa raiz:** `src/main.ts` no instancia `helmet` ni `compression`, y el repositorio no declara ninguno de los dos en `dependencies`.
 
@@ -137,13 +139,13 @@ Verificado con `curl -D -` sobre la respuesta de `/api/docs`:
 |---|---:|---:|---:|---|
 | `swagger-ui-bundle.js` | 1 452 753 | **1 418,7** | 250 KB | FAIL **5,7x** |
 | `swagger-ui-standalone-preset.js` | 230 293 | 224,9 | — | precargado |
-| `swagger-ui-init.js` | 45 218 | 44,2 | 50 KB | OK |
+| `swagger-ui-init.js` | **44 666** | 43,6 | 50 KB | OK |
 | `swagger-ui.css` | 152 071 | **148,5** | 100 KB | FAIL 1,5x |
 | `favicon-16/32.png` | 1 293 | 1,2 | — | OK |
 | HTML shell | 3 126 | 3,1 | — | OK |
-| **TOTAL** | **1 884 754** | **1 840,6** | **225 KB** | **FAIL 8,2x** |
+| **TOTAL** | **1 884 202** | **1 840,0** | **225 KB** | **FAIL 8,2x** |
 | Total CSS | | 148,5 | 100 KB | FAIL |
-| Total JS | | **1 687,8** | 200 KB | **FAIL 8,4x** |
+| Total JS | | **1 687,2** | 200 KB | **FAIL 8,4x** |
 
 **Compresion: ausente.** Verificado con peticion condicional:
 
@@ -305,9 +307,9 @@ Los limites deben verificarse en CI, no confiar en la revision:
 | Activo | Limite | Valor actual |
 |---|---|---|
 | CSS total | **<= 100 KB** sin comprimir | 148,5 KB |
-| JS total | **<= 200 KB** sin comprimir | 1 687,8 KB |
+| JS total | **<= 200 KB** sin comprimir | 1 687,2 KB |
 | JS total con `compression()` activo | <= 200 KB transferidos | sin medir (compresion ausente) |
-| Transferencia total inicial | <= 225 KB | 1 840,6 KB |
+| Transferencia total inicial | <= 225 KB | 1 840,0 KB |
 | LCP | <= 2,5 s (movil emulado, CPU 4x) | sin medir |
 | CLS | <= 0,1 | sin medir |
 | INP | <= 200 ms | sin medir |
@@ -324,5 +326,5 @@ Los limites deben verificarse en CI, no confiar en la revision:
 | A-03 | Critica | Sin `meta viewport`; Reflow imposible en movil | 1.4.10 (AA) | 0 ocurrencias en 3 126 B |
 | A-04 | Critica | Sin bloques de derivacion ni landmarks | 2.4.1 (A), 1.3.1 (A) | `role=`/`aria-*`/`<main>` = 0 |
 | A-05 | Critica | 6 cabeceras de seguridad ausentes; CORS abierto | — (seguridad) | `curl -D -` |
-| A-06 | Critica | Presupuesto excedido 8,2x; sin compresion | — (rendimiento) | 1 884 754 B medidos |
+| A-06 | Critica | Presupuesto excedido 8,2x; sin compresion | — (rendimiento) | 1 884 202 B medidos (R2) |
 | A-07 | Pendiente | Contraste y teclado sin verificar | 1.4.3, 2.1.1 | sin instrumentacion |

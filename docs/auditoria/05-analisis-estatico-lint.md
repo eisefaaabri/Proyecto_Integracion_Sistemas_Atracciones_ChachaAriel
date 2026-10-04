@@ -1,8 +1,8 @@
 # Informe 05 — Analisis Estatico y Deuda Tecnica
 
-**Alcance:** `src/modules/atracciones/**` y `src/common/**` (27 archivos, 2 056 de las 3 742 lineas del repositorio)
-**Fecha:** 2026-09-30
-**Commit:** `0cceeb5`
+**Alcance:** `src/modules/atracciones/**` y `src/common/**` (27 archivos, 2 046 de las 3 725 lineas del repositorio)
+**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04 sobre `a4b4657` + arbol de trabajo sin commitear
+**Commit:** `0cceeb5` (R1) → `a4b4657` (R2)
 **Metodo:** ESLint **no esta instalado ni configurado** en el repositorio. Se aplico un analisis estatico manual sobre las reglas que un perfil `typescript-eslint:recommended` + `plugin:@typescript-eslint/recommended` activaria, mas reglas de rendimiento propias de ORM.
 
 ---
@@ -34,7 +34,7 @@ Lo mismo ocurre con **`npm run format`** (`package.json:10`): invoca `prettier`,
 
 ### 1.2 La paradoja de `tsc --noEmit`
 
-`npx tsc --noEmit` devuelve **0 errores** sobre 2 056 lineas. Es un resultado notable y conviene entender que **no** significa que el codigo sea correcto:
+`npx tsc --noEmit` devuelve **0 errores** sobre 2 046 lineas. Es un resultado notable y conviene entender que **no** significa que el codigo sea correcto:
 
 - TypeScript comprueba la coherencia de tipos, no la correccion del diseno.
 - Un `tsc` limpio es compatible con un patron N+1, con `eager: true` en siete relaciones, con una transaction ausente y con un contrato que declara endpoints inexistentes. **Todos los hallazgos criticos de esta auditoria son invisibles para el compilador.**
@@ -49,8 +49,8 @@ Lo mismo ocurre con **`npm run format`** (`package.json:10`): invoca `prettier`,
 | Metrica | Scope auditado | Repositorio completo |
 |---|---:|---:|
 | Archivos `.ts` | 27 | 52 |
-| Lineas | 2 056 | 3 742 |
-| Archivos > 300 lineas | 2 | 4 |
+| Lineas | **2 046** | **3 725** |
+| Archivos > 300 lineas | 2 | **2** (corregido en R2) |
 | Errores de compilacion | **0** | **0** |
 | Suites de pruebas | **0** | **0** |
 
@@ -59,7 +59,7 @@ Lo mismo ocurre con **`npm run format`** (`package.json:10`): invoca `prettier`,
 | Archivo | Lineas | Observacion |
 |---|---:|---|
 | `atracciones.service.ts` | **745** | 6 repositorios inyectados; casos de uso, acceso a datos, mapeo y utilidades en una sola clase. Viola SRP |
-| `atracciones.controller.ts` | 328 | 13 handlers, 328 lineas. Aceptable, aunque los bloques de comentarios decorativos consumen ~60 lineas |
+  | `atracciones.controller.ts` | **318** | 13 handlers, 318 lineas. Aceptable, aunque los bloques de comentarios decorativos consumen ~60 lineas |
 
 **El archivo mas grave del repositorio por concentracion de responsabilidades** es `atracciones.service.ts`, con 745 lineas y 4 roles distintos. Contraste util: `AtraccionResponseDto` son 64 lineas y una sola responsabilidad.
 
@@ -309,3 +309,51 @@ Sin ella, los pasos 1–8 no se pueden proteger de regresiones. Cobertura minima
 | **Total del scope auditado** | | **≈ 2 dias** |
 
 **Prioridad por valor, no por volumen.** Los 5 simbolos sin usar y los 4 `any` son la parte visible y mediocre de la deuda. La parte cara son los 6 bloques no transaccionales, los 3 bucles con `await` y los 7 `eager: true` — ninguno de los cuales es un aviso del linter. Por eso el Paso 2 (reglas de ORM) tiene mas valor que los pasos 1 y 3 juntos: no limpia lo que ya esta sucio, pero impide que vuelva a aparecer lo que hoy cuesta 2 639 ms.
+
+---
+
+## 7. Revisión 2 — Estado del análisis estático (2026-10-04)
+
+Commit `a4b4657` + árbol de trabajo sin commitear. Reverificación completa del recuento.
+
+### 7.1 Lo que no ha cambiado (y por qué importa)
+
+| Métrica | R1 | R2 | Explicación |
+|---|---:|---:|---|
+| Archivos `.ts` / líneas (repo) | 52 / 3 742 | **52 / 3 725** | −17 líneas, todas en controladores |
+| Líneas del alcance auditado | 2 056 | **2 046** | idem |
+| `atracciones.service.ts` | 745 | **745** | El servicio **no se ha tocado** |
+| Importaciones sin usar | 5 | **5** | Sin cambios en `service.ts` ni en `create-atraccion.dto.ts` |
+| `as any` / `: any` (scope) | 4 | **4** | Sin cambios |
+| `eager: true` | 7 | **7** | Sin cambios en las entidades |
+| `await` en bucle | 3 | **3** | Sin cambios |
+| Enums duplicados | 2 enums / 5 declaraciones | **2 / 5** | Sin cambios |
+| Bloques de borrado + reescritura | 6 | **6** | Sin cambios |
+| `EntityManager` importado y sin usar | 1 | **1** | Sin cambios |
+| Métodos sin tipo de retorno explícito | 6 | **6** | Sin cambios |
+| `.eslintrc*` / `eslint.config.*` / `.prettierrc` | ausentes | **ausentes** | Reverificado |
+| `eslint` / `prettier` / `jest` en `devDependencies` | no | **no** | Reverificado |
+| Suites de pruebas | 0 | **0** | Reverificado |
+| `npm run lint` funcional | no | **no** | Reverificado |
+
+**Lectura.** La Revision 2 audita cuatro commits y **ninguno toca el servicio, las entidades ni los DTOs**. Por eso la deuda técnica estática medida es **exactamente la misma**, y el plan de 9 pasos de §5 sigue vigente sin modificaciones. Una actualización de documentación que hubiera_VARADO los conteos habría creado una divergencia más en un repositorio cuyo problema central es, precisamente, que las fuentes no coinciden.
+
+### 7.2 Correcciones a la Revisión 1
+
+Dos cifras de la R1 eran incorrectas y se corrigen aquí:
+
+| Cifra | R1 | Valor real | Origen del error |
+|---|---:|---:|---|
+| Archivos > 300 líneas en el repositorio | 4 | **2** | Recuento con un criterio distinto al usado para el scope. Verificado: en todo `src/` solo `atracciones.service.ts` (745) y `atracciones.controller.ts` (318) superan las 300 líneas |
+| Archivos > 300 líneas en el scope | 2 | **2** | Correcta |
+
+### 7.3 Hallazgos estáticos nuevos
+
+Ninguno de los cinco anteriores cambia. Los cambios de la R2 introducen dos observaciones nuevas, ambas **del mismo tipo**: capacidad declarada y no usada. Son invisibles para `tsc` y para `no-unused-vars`, lo que confirma la tesis del §2.1.
+
+| # | Observación | Verificación | Regla propuesta |
+|---|---|---|---|
+| **1** | **Versionado declarado y no usado.** `enableVersioning({ type: VersioningType.URI, defaultVersion: '1' })` activa una capacidad de versionado por ruta y hay **0 anotaciones `@Version()`** en todo el repositorio | `Select-String "@Version\("` → 0 | No hay regla de linter que lo detecte. Es una **regla de arquitectura**: si `enableVersioning` está activo, cada controlador debe declarar su versión explícitamente |
+| **2** | **Cabeceras obligatorias declaradas por inferencia.** 13 declaraciones `@ApiHeader` eliminadas; el documento sigue exponiendo la cabecera porque NestJS la rederiva de `@Headers(...)` | `/api/docs-json` → `in: header, required: true` sin `description` | `@typescript-eslint/no-unsafe-*` no aplica. Es un hallazgo de **contrato**, registrado como **H-14** / **D-12** |
+
+**Conteo final de la R2:** 5 importaciones muertas · 4 `any` · 2 enums duplicados (5 declaraciones) · 6 bloques no transaccionales · 3 bucles con `await` · 7 `eager: true` · 0 reglas de ORM activas · 0 pruebas. **Sin cambios.**

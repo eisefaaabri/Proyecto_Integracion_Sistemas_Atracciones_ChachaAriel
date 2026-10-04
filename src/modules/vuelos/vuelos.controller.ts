@@ -36,7 +36,6 @@ export class VuelosController {
   @ApiTags('Bloqueo de Cupos (Hold)')
   @ApiSecurity('OAuth2Security', ['flights:hold'])
   @ApiOperation({ summary: 'Bloquear inventario' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiResponse({ status: 201, description: 'Inventario retenido. Devuelve precio congelado.' })
   holdOffer(@Headers('Idempotency-Key') idempotencyKey: string, @Body() holdRequestDto: HoldRequestDto) {
     return {};
@@ -83,7 +82,6 @@ export class VuelosController {
   @ApiTags('Reservas y Emisión')
   @ApiSecurity('OAuth2Security', ['flights:book'])
   @ApiOperation({ summary: 'Crear reserva y gestionar emisión de ticket' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiResponse({ status: 201, description: 'Reserva creada y ticket emitido correctamente.' })
   @ApiResponse({ status: 202, description: 'Reserva creada; pago o emisión de ticket continúa de forma asíncrona.' })
   createBooking(@Headers('Idempotency-Key') idempotencyKey: string, @Body() bookingRequestDto: BookingRequestDto) {
@@ -136,7 +134,6 @@ export class VuelosController {
   @ApiTags('Postventa (Maletas, Fechas y Cancelaciones)')
   @ApiSecurity('OAuth2Security', ['flights:book'])
   @ApiOperation({ summary: 'Agregar maleta extra post-emisión' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiParam({ name: 'bookingId', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Maleta agregada' })
   addBaggage(@Headers('Idempotency-Key') idempotencyKey: string, @Param('bookingId', ParseUUIDPipe) bookingId: string, @Body() addBaggageRequestDto: AddBaggageRequestDto) {
@@ -157,7 +154,6 @@ export class VuelosController {
   @ApiTags('Postventa (Maletas, Fechas y Cancelaciones)')
   @ApiSecurity('OAuth2Security', ['flights:book'])
   @ApiOperation({ summary: 'Confirmar cambio de fecha' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiParam({ name: 'bookingId', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Cambio confirmado' })
   confirmDateChange(@Headers('Idempotency-Key') idempotencyKey: string, @Param('bookingId', ParseUUIDPipe) bookingId: string, @Body() dateChangeRequestDto: DateChangeRequestDto) {
@@ -178,7 +174,6 @@ export class VuelosController {
   @ApiTags('Postventa (Maletas, Fechas y Cancelaciones)')
   @ApiSecurity('OAuth2Security', ['flights:cancel'])
   @ApiOperation({ summary: 'Cancelar reserva' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiParam({ name: 'bookingId', type: 'string', format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Cancelación exitosa' })
   cancelBooking(@Headers('Idempotency-Key') idempotencyKey: string, @Param('bookingId', ParseUUIDPipe) bookingId: string, @Body() cancelBookingRequestDto: CancelBookingRequestDto) {

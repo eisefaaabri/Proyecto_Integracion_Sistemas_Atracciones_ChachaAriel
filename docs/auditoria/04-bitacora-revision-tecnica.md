@@ -1,9 +1,9 @@
 # Informe 04 — Bitacora de Revision Tecnica y Metricas
 
 **Proyecto:** Booking Prototipo — API de Atracciones
-**Alcance de la revision:** `atracciones` + `common` (27 archivos, 2 056 lineas de las 3 742 del repositorio)
-**Fecha:** 2026-09-30
-**Commit auditado:** `0cceeb5` (HEAD de `main`)
+**Alcance de la revision:** `atracciones` + `common` (27 archivos, 2 046 lineas de las 3 725 del repositorio)
+**Fecha:** 2026-09-30 · **Revision 2:** 2026-10-04
+**Commit auditado:** `0cceeb5` (R1) → `a4b4657` + arbol de trabajo sin commitear (R2)
 
 ---
 
@@ -96,8 +96,8 @@ Resultado de la sesion del 2026-09-30 contra `dist/main.js` en `http://localhost
 | Metrica | Valor | Fuente |
 |---|---|---|
 | Archivos TypeScript (total repo) | 52 | Recuento |
-| Lineas de codigo (total repo) | 3 742 | Recuento |
-| Lineas en el scope auditado | 2 056 | Recuento |
+| Lineas de codigo (total repo) | **3 725** (R1: 3 742) | Recuento |
+| Lineas en el scope auditado | **2 046** (R1: 2 056) | Recuento |
 | Errores de `tsc --noEmit` | **0** | `npx tsc --noEmit` |
 | Errores de compilacion | **0** | `npx nest build` |
 | Inicializacion de `TypeOrmCoreModule` | **+337 ms** | Log de Nest |
@@ -138,13 +138,15 @@ Condiciones: cliente y servidor en el mismo host, dataset de 1 a 18 atracciones,
 |---|---:|---:|---:|---|
 | `swagger-ui-bundle.js` | 1 452 753 | 1 418,7 | 250 KB | 5,7× |
 | `swagger-ui-standalone-preset.js` | 230 293 | 224,9 | — | — |
-| `swagger-ui-init.js` | 45 218 | 44,2 | 50 KB | — |
+| `swagger-ui-init.js` | **44 666** | 43,6 | 50 KB | — |
 | `swagger-ui.css` | 152 071 | 148,5 | 100 KB | 1,5× |
 | `favicon` ×2 | 1 293 | 1,2 | — | — |
 | HTML shell | 3 126 | 3,1 | — | — |
-| **TOTAL** | **1 884 754** | **1 840,6** | **225 KB** | **8,2×** |
+| **TOTAL** | **1 884 202** | **1 840,0** | **225 KB** | **8,2×** |
 | CSS total | | 148,5 | 100 KB | 1,5× |
-| JS total | | 1 687,8 | 200 KB | 8,4× |
+| JS total | | 1 687,2 | 200 KB | 8,4× |
+
+**Cifras de la R2** (2026-10-04, remedicion): solo cambia `swagger-ui-init.js` (45 218 → **44 666 B**), que embebe el documento OpenAPI; el resto de activos es identico y el ratio se mantiene en 8,2×.
 
 **Compresion:** ausente. `bundle.js` responde con 1 452 753 bytes tanto con como sin `Accept-Encoding`. Impacto estimado con gzip: total de ~500 KB.
 
@@ -183,7 +185,7 @@ Condiciones: cliente y servidor en el mismo host, dataset de 1 a 18 atracciones,
 | R-09 | Latencia de catalogo > 1 s impide la adopcion del listado en el cliente | Alta | Medio | **ALTO** | H-01: retirar `eager`, reescribir `findAll` |
 | R-10 | Colision de metadatos TypeORM al activar varios modulos (escenario README) | Media | Medio | **MEDIO** | Test de arranque con los 4 modulos |
 | R-11 | Sin observabilidad: cualquier incidente sera indemostrable | Alta | Medio | **ALTO** | Logger + `X-Request-Id` + metricas |
-| R-12 | Cambio de esquema en cascada al normalizar, sin migraciones | Baja | Alto | **MEDIO** | Migraciones versionadas, retirar `synchronize` |
+| R-12 | Cambio de esquema en cascada al normalizar, sin migraciones | **Alta** (R2) | Alto | **ALTO** | Migraciones versionadas, retirar `synchronize`. **Materializado en R2**: ver R-13 |
 
 ---
 
@@ -267,3 +269,72 @@ El repositorio no tiene instrumentacion de analitica y no se ha ejecutado ningun
 Tras la contencion, el servicio podra desplegarse en un entorno de integracion. Para produccion faltan ademas: transacciones en `PUT`/`PATCH` (H-05), cotas de paginacion (H-06), limites de error RFC 7807 (H-08), retirada de `synchronize` con migraciones (H-09), carga diferida (H-01), resolucion del N+1 (H-02) y observabilidad (M-18).
 
 **Nota final sobre el alcance de esta bitacora.** Todas las cifras de latencia, tamaño y conformance de este informe proceden de ejecuciones reales sobre el codigo compilado del repositorio, en el entorno descrito en §4.2. No hay cifras estimadas ni proyectadas. Donde no se pudo medir (contraste, navegacion por teclado, comportamiento en navegador movil, pruebas con usuarios) se ha registrado explicitamente como pendiente, con el procedimiento y la herramienta necesarios para cerrarlo.
+
+---
+
+## 9. Revisión 2 — Sesión del 2026-10-04
+
+**Motivo:** el equipo realizó cambios en el repositorio tras la Revisión 1 y solicitó actualizar los informes.
+**Alcance de esta sesión:** 4 commits y 4 controladores modificados sin commitear. **Ninguna prueba funcional destructiva**: la sesión fue de solo lectura sobre los datos.
+
+### 9.1 Registro de la sesión
+
+| # | Actividad | Resultado | Evidencia |
+|---|---|---|---|
+| 1 | Inventario de cambios desde `0cceeb5` | 4 commits: `d2ef09c`, `b83a884`, `b883d9c`, `a4b4657` + 4 controladores sin commitear | `git log`, `git diff --stat` |
+| 2 | Lectura del cambio de versionado | `setGlobalPrefix('api')` + `enableVersioning({type: URI, defaultVersion: '1'})` | `src/main.ts:9-13` |
+| 3 | `tsc --noEmit` | **0 errores** | exit code 0 |
+| 4 | `nest build` | **correcto** | exit code 0 |
+| 5 | Verificacion de rutas contra el servicio en ejecucion | `/api/atracciones` → **404**, `/api/v1/atracciones` → **200**, `/api/v2/atracciones` → **404**, `/api/docs` → **200** | `curl` a `localhost:3000` |
+| 6 | Reinspeccion del documento OpenAPI generado | 10 paths, **14 operaciones**, `security` en **0 de 14**, `servers` **no declarado** | `/api/docs-json` |
+| 7 | Reinspeccion de la cabecera `Idempotency-Key` | Presente como `in: header, required: true` pero **sin `description`**; 3 de 4 controladores ya no la declaran | `/api/docs-json` vs `atracciones.controller.ts` |
+| 8 | Estado del esquema en PostgreSQL 16 | `atracciones.id :: uuid` (default `uuid_generate_v4()`), `reservations.reservation_id :: uuid`, valores UUID reales. **Sin deriva de esquema** | `information_schema.columns` |
+| 9 | Estado de las migraciones | **No existe** `src/migrations/` ni `src/data-source.ts`; `migrations` no esta cableado en `TypeOrmModule.forRootAsync` | `app.module.ts:15-24` |
+| 10 | Remedicion de recursos de `/api/docs` | Total **1 884 202 B** (R1: 1 884 754). `swagger-ui-init.js` 45 218 → **44 666 B** | peticion HTTP a los 6 recursos |
+| 11 | Reverificacion de cabeceras HTTP de `/api/docs` | 0 de 8 cabeceras de seguridad; `Access-Control-Allow-Origin: *`; `X-Powered-By: Express`; `Content-Encoding` ausente | peticion HTTP |
+| 12 | Recuento estatico de codigo | 52 archivos / **3 725** lineas (repo); 27 archivos / **2 046** lineas (scope) | `Get-ChildItem` + `Get-Content` |
+| 13 | Estado del entorno al terminar | Sesión de solo lectura: **0 filas creadas**. `atracciones: 1`, `reservations: 1` (esta última ajena a la auditoría, ver 9.3) | `psql` |
+
+### 9.2 Near-miss documentado: R-13
+
+**R-13 — Pérdida de datos por `synchronize` durante un cambio de esquema (materializado y revertido en 21 minutos)**
+
+| # | Hecho verificado |
+|---|---|
+| 1 | `b883d9c` (09:50) cambió las PK de `uuid` a `varchar` con prefijo `ATR_`, añadió `data-source.ts` y una migración de 77 líneas, y saltó la ruta a `v2` |
+| 2 | No hay migraciones cableadas: sin `data-source.ts` en el estado final, sin `src/migrations/`, sin array `migrations` en la configuración de TypeORM. **La migración de 77 líneas no pudo ejecutarse nunca** |
+| 3 | El único mecanismo de evolución de esquema es `synchronize: true` (`app.module.ts:22`), que reescribe tablas en caliente |
+| 4 | Si el servidor hubiera estado en ejecución durante esos 21 minutos, `synchronize` habría aplicado `uuid` → `varchar` sobre tablas con datos, y el revert habría exigido convertir valores `ATR_xxx` de vuelta a `uuid` — algo que PostgreSQL no hace de forma implícita |
+| 5 | El revert (`a4b4657`, 10:11) fue limpio. Verificado: esquema `uuid` intacto, valores UUID reales, sin residuos |
+| 6 | El daño se evitó por **suerte de calendario**, no por diseño |
+
+**Probabilidad:** Alta — cualquier cambio de esquema futuro tiene la misma vía.
+**Impacto:** Alto — pérdida de claves primarias y de referencias, sin migración que la reconstruya.
+**Mitigación:** cablear `typeorm migration:run` + `data-source.ts` antes de permitir cambios de esquema; y retirar `synchronize` de todo entorno no efímero. Subir **R-12** de Media a **Alta** en el §5.
+
+### 9.3 Registro de limpieza del entorno (R2)
+
+La sesión del 2026-10-04 fue de **solo lectura**: no se creó ni modificó ninguna fila. Las únicas peticiones fueron `GET /api/docs`, `GET /api/docs-json`, `GET /api/v1/atracciones` y consultas de solo lectura a PostgreSQL.
+
+| Comprobación | Resultado |
+|---|---|
+| Filas creadas por la auditoría en R2 | **0** |
+| Migraciones ejecutadas | **0** |
+| Cambios de esquema | **0** (esquema `uuid` verificado intacto) |
+| Archivos del proyecto modificados | **0** — solo `docs/auditoria/**` |
+
+**Estado de la base de datos al cierre de esta sesión:** `atracciones: 1` (la original), `reservations: 1`.
+
+> **Aclaración de trazabilidad.** En la R1 el estado era `reservations: 0` porque la auditoría había borrado sus propios datos de prueba. La reserva que figura ahora (`778b4f36…`, 2 tickets, `CONFIRMED`, `Juan Pérez`, `2026-10-04 15:28:30`) es **ajena a esta auditoría**: fue creada por el servidor de desarrollo del equipo durante pruebas manuales posteriores. **No se ha tocado ni debe tocarse.** Se documenta aquí para que un futuro inventario de datos pueda distinguir los datos de la auditoría de los del equipo.
+
+### 9.4 Conteo final de hallazgos
+
+| Severidad | R1 | R2 | Total |
+|---|---:|---:|---:|
+| Criticos | 5 | 0 | **5** |
+| Altos | 13 | +1 (H-14) | **14** |
+| Medios | 20 | +3 (M-21, M-22, M-23) | **23** |
+| Bajos | 8 | 0 | **8** |
+| **Total** | **46** | **+4** | **50** |
+
+**Ninguno de los 46 hallazgos de la Revisión 1 se ha cerrado.** Los 5 críticos permanecen abiertos y verificados.
