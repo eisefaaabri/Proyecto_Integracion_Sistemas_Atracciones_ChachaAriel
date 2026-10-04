@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { CommonModule } from './common/common.module';
 import { AtraccionesModule } from './modules/atracciones/atracciones.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { AtraccionesModule } from './modules/atracciones/atracciones.module';
     }),
 
     CommonModule,
-
+    AuthModule,
     AtraccionesModule,
   ],
   controllers: [],

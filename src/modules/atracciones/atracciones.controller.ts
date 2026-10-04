@@ -42,6 +42,8 @@ import {
 } from './dto/reservation.dto';
 import { IdempotencyKeyGuard } from '../../common/guards/idempotency-key.guard';
 import { ErrorDto } from '../../common/dto/error.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('Atracciones - Catálogo')
 @Controller('atracciones')
@@ -88,6 +90,8 @@ export class AtraccionesController {
   }
 
   @Get('reservations')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiTags('Atracciones - Reservas')
   @ApiOperation({ summary: 'Historial de reservas del usuario' })
   @ApiResponse({
@@ -100,6 +104,8 @@ export class AtraccionesController {
   }
 
   @Get('reservations/:reservationId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiTags('Atracciones - Reservas')
   @ApiOperation({ summary: 'Obtener detalle de una reserva específica' })
   @ApiParam({
@@ -122,7 +128,8 @@ export class AtraccionesController {
 
   @Post('reservations/:reservationId/cancel')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(IdempotencyKeyGuard)
+  @UseGuards(JwtAuthGuard, IdempotencyKeyGuard)
+  @ApiBearerAuth()
   @ApiTags('Atracciones - Reservas')
   @ApiOperation({ summary: 'Cancelar una reserva existente' })
   @ApiParam({
@@ -165,6 +172,8 @@ export class AtraccionesController {
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Registrar una nueva atracción' })
   @ApiResponse({
     status: 201,
@@ -209,6 +218,8 @@ export class AtraccionesController {
 
   @Put(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Reemplazar datos completos de una atracción' })
   @ApiParam({
     name: 'id',
@@ -227,6 +238,8 @@ export class AtraccionesController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Actualizar parcialmente una atracción' })
   @ApiParam({
     name: 'id',
@@ -250,6 +263,8 @@ export class AtraccionesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Eliminar una atracción' })
   @ApiParam({
     name: 'id',
@@ -292,7 +307,8 @@ export class AtraccionesController {
 
   @Post(':id/reservations')
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(IdempotencyKeyGuard)
+  @UseGuards(JwtAuthGuard, IdempotencyKeyGuard)
+  @ApiBearerAuth()
   @ApiTags('Atracciones - Reservas')
   @ApiOperation({ summary: 'Crear una reserva de la atracción' })
   @ApiParam({

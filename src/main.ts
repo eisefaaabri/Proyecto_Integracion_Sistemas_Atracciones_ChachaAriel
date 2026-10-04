@@ -67,6 +67,7 @@ async function bootstrap() {
         },
       },
     })
+    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
