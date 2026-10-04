@@ -16,7 +16,7 @@ export class AtraccionInclude {
   @JoinColumn({ name: 'atraccion_id' })
   atraccion: Atraccion;
 
-  @Column({ type: 'varchar', length: 50 })
+  @Column({ type: 'uuid' })
   atraccion_id: string;
 
   @Column({ type: 'varchar', length: 255 })

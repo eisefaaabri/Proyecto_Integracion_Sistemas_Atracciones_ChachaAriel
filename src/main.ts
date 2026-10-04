@@ -9,7 +9,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
-    defaultVersion: '2',
+    defaultVersion: '1',
   });
 
   app.enableCors();
@@ -35,7 +35,7 @@ async function bootstrap() {
       'garantizar operaciones idempotentes y evitar reservas o cancelaciones duplicadas.\n' +
       'Los errores siguen el estándar RFC 7807 (application/problem+json).',
     )
-    .setVersion('2.0.0')
+    .setVersion('1.2.0')
     .addOAuth2({
       type: 'oauth2',
       flows: {
