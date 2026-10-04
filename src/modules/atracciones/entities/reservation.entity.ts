@@ -28,7 +28,7 @@ export class Reservation {
   @JoinColumn({ name: 'atraccion_id' })
   atraccion: Atraccion;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'varchar', length: 50 })
   atraccion_id: string;
 
   @Column({

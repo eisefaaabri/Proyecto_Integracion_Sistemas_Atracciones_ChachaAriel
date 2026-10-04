@@ -207,7 +207,7 @@ export class AtraccionesController {
     type: AtraccionResponseDto,
   })
   @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
+  async findOne(@Param('id') id: string) {
     return this.atraccionesService.findOne(id);
   }
 
@@ -216,15 +216,14 @@ export class AtraccionesController {
   @ApiOperation({ summary: 'Reemplazar datos completos de una atracción' })
   @ApiParam({
     name: 'id',
-    description: 'UUID de la atracción',
+    description: 'ID de la atracción (prefijo ATR_)',
     type: 'string',
-    format: 'uuid',
   })
   @ApiResponse({ status: 204, description: 'Reemplazo exitoso sin contenido de respuesta.' })
   @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.' })
   @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
   async replace(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: CreateAtraccionDto,
   ) {
     await this.atraccionesService.replace(id, dto);
@@ -234,9 +233,8 @@ export class AtraccionesController {
   @ApiOperation({ summary: 'Actualizar parcialmente una atracción' })
   @ApiParam({
     name: 'id',
-    description: 'UUID de la atracción',
+    description: 'ID de la atracción (prefijo ATR_)',
     type: 'string',
-    format: 'uuid',
   })
   @ApiResponse({
     status: 200,
@@ -246,7 +244,7 @@ export class AtraccionesController {
   @ApiResponse({ status: 400, description: 'Bad Request. Datos de entrada inválidos.' })
   @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
   async update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() dto: UpdateAtraccionDto,
   ) {
     return this.atraccionesService.update(id, dto);
@@ -257,13 +255,12 @@ export class AtraccionesController {
   @ApiOperation({ summary: 'Eliminar una atracción' })
   @ApiParam({
     name: 'id',
-    description: 'UUID de la atracción',
+    description: 'ID de la atracción (prefijo ATR_)',
     type: 'string',
-    format: 'uuid',
   })
   @ApiResponse({ status: 204, description: 'Eliminación exitosa sin contenido.' })
   @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
+  async remove(@Param('id') id: string) {
     await this.atraccionesService.remove(id);
   }
 
@@ -288,7 +285,7 @@ export class AtraccionesController {
   })
   @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
   async getAvailability(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Query('date') date: string,
   ) {
     return this.atraccionesService.getAvailability(id, date);
@@ -301,9 +298,8 @@ export class AtraccionesController {
   @ApiOperation({ summary: 'Crear una reserva de la atracción' })
   @ApiParam({
     name: 'id',
-    description: 'UUID de la atracción',
+    description: 'ID de la atracción (prefijo ATR_)',
     type: 'string',
-    format: 'uuid',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -319,7 +315,7 @@ export class AtraccionesController {
   @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
   @ApiResponse({ status: 409, description: 'Conflicto de idempotencia.' })
   async reserve(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Headers('idempotency-key') idempotencyKey: string,
     @Body() reservationDto: ReservationRequestDto,
   ) {

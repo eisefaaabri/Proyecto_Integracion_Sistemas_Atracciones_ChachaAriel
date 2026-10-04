@@ -1,7 +1,8 @@
 import {
   Column,
   Entity,
-  PrimaryGeneratedColumn,
+  PrimaryColumn,
+  BeforeInsert,
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
@@ -34,8 +35,16 @@ export enum ProductType {
 @Check('CHK_rating_range', '"rating_score" IS NULL OR ("rating_score" >= 0 AND "rating_score" <= 5)')
 @Check('CHK_rating_count', '"rating_count" >= 0')
 export class Atraccion {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryColumn({ type: 'varchar', length: 50 })
   id: string;
+
+  @BeforeInsert()
+  generateId() {
+    if (!this.id) {
+      const { v4: uuidv4 } = require('uuid');
+      this.id = `ATR_${uuidv4()}`;
+    }
+  }
 
   @Column({ type: 'varchar', length: 255 })
   name: string;
