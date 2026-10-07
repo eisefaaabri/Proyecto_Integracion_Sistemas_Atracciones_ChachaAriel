@@ -48,8 +48,10 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger solo en desarrollo/pre-producción: no exponer docs en producción.
-  if (!isProduction) {
+  // Swagger por defecto solo en desarrollo/pre-producción.
+  // En producción se puede forzar con SWAGGER_ENABLED=true (env).
+  const swaggerEnabled = configService.get<string>("SWAGGER_ENABLED") === "true";
+  if (!isProduction || swaggerEnabled) {
     const config = new DocumentBuilder()
       .setTitle("API de Atracciones Turísticas")
       .setDescription(
@@ -88,7 +90,7 @@ async function bootstrap() {
 
   console.log(
     `[API] entorno=${isProduction ? "production" : "dev"} puerto=${port} ` +
-      `cors=${frontendUrl}${isProduction ? "" : " docs=/api/docs"}`,
+      `cors=${frontendUrl}${!isProduction || swaggerEnabled ? " docs=/api/docs" : ""}`,
   );
 }
 bootstrap();
