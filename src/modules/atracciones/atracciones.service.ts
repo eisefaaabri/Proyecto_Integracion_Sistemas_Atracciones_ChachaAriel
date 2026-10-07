@@ -79,10 +79,27 @@ export class AtraccionesService {
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const [items, total] = await this.atraccionRepository.findAndCount({
-      skip,
-      take: limit,
-    });
+    const qb = this.atraccionRepository.createQueryBuilder("a");
+
+    if (query.q?.trim()) {
+      const like = `%${query.q.trim()}%`;
+      qb.andWhere(
+        "(a.nombre ILIKE :q OR a.descripcion ILIKE :q OR a.codigo_aeropuerto ILIKE :q)",
+        { q: like },
+      );
+    }
+
+    if (query.aeropuerto?.trim()) {
+      qb.andWhere("a.codigo_aeropuerto = :apt", {
+        apt: query.aeropuerto.trim().toUpperCase(),
+      });
+    }
+
+    const [items, total] = await qb
+      .orderBy("a.nombre", "ASC")
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
 
     return {
       data: items,
@@ -506,6 +523,28 @@ async getReservationById(id: string, usuarioId: string) {
     if (!wishlist) throw new NotFoundException("No está en tus favoritos");
 
     await this.wishlistRepository.remove(wishlist);
+  }
+
+  async getWishlist(usuarioId: string) {
+    const cliente = await this.clienteRepository.findOne({
+      where: { usuario: { id: usuarioId } },
+    });
+    if (!cliente) throw new NotFoundException("Cliente no encontrado");
+
+    const items = await this.wishlistRepository.find({
+      where: { cliente: { id: cliente.id } },
+      relations: ["atraccion"],
+      order: { added_at: "DESC" },
+    });
+
+    return {
+      data: items.map((w) => ({
+        wishlist_id: w.id,
+        added_at: w.added_at,
+        atraccion_id: w.atraccion.id,
+        atraccion: w.atraccion,
+      })),
+    };
   }
 
   // ==========================================

@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsInt, IsOptional, Min } from "class-validator";
+import { IsInt, IsOptional, IsString, Min } from "class-validator";
 
 export class PaginationQueryDto {
   @ApiPropertyOptional({ description: "Página actual", default: 1, minimum: 1 })
@@ -20,4 +20,20 @@ export class PaginationQueryDto {
   @IsInt()
   @Min(1)
   limit?: number = 10;
+
+  @ApiPropertyOptional({
+    description: "Búsqueda por nombre, descripción o aeropuerto (case-insensitive)",
+    example: "Quito",
+  })
+  @IsOptional()
+  @IsString()
+  q?: string;
+
+  @ApiPropertyOptional({
+    description: "Filtrar por código de aeropuerto (ej. UIO, GYE)",
+    example: "UIO",
+  })
+  @IsOptional()
+  @IsString()
+  aeropuerto?: string;
 }

@@ -228,6 +228,19 @@ export class AtraccionesController {
     return atraccion;
   }
 
+  @Get("users/me/wishlist")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiTags("Wishlist")
+  @ApiOperation({ summary: "Listar favoritos del usuario" })
+  @ApiResponse({
+    status: 200,
+    description: "Listado de favoritos (con la atracción anidada).",
+  })
+  async getWishlist(@Req() req: Request) {
+    return this.atraccionesService.getWishlist((req.user as any).userId);
+  }
+
   @Get(":id")
   @Header("X-API-Deprecation-Date", "2027-12-31")
   @Header("Cache-Control", "max-age=300")
