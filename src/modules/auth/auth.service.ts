@@ -57,60 +57,77 @@ export class AuthService {
    * Devuelve el mismo shape que /login para que el frontend quede con sesión.
    */
   async register(registerDto: RegisterDto) {
-    const existing = await this.usuarioRepository.findOne({
-      where: { email: registerDto.email },
-    });
-    if (existing) {
-      throw new ConflictException("El email ya está registrado");
-    }
+    const connection = this.usuarioRepository.manager.connection;
+    const queryRunner = connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const passwordHash = await bcrypt.hash(registerDto.password, 10);
-    const usuario = this.usuarioRepository.create({
-      email: registerDto.email,
-      password_hash: passwordHash,
-      rol: RolUsuario.TURISTA,
-      estado: true,
-    });
     try {
-      await this.usuarioRepository.save(usuario);
-    } catch (err) {
-      if (String(err?.code) === "23505") {
+      // Pre-checks con mensajes limpios (además de los constraints únicos).
+      const emailEnUso = await queryRunner.manager.findOne(Usuario, {
+        where: { email: registerDto.email },
+      });
+      if (emailEnUso) {
         throw new ConflictException("El email ya está registrado");
       }
-      throw err;
-    }
-
-    const cliente = this.clienteRepository.create({
-      dni: registerDto.dni,
-      nombre_completo: registerDto.nombre_completo,
-      telefono: registerDto.telefono ?? null,
-      usuario,
-    });
-    try {
-      await this.clienteRepository.save(cliente);
-    } catch (err) {
-      if (String(err?.code) === "23505") {
+      const dniEnUso = await queryRunner.manager.findOne(Cliente, {
+        where: { dni: registerDto.dni },
+      });
+      if (dniEnUso) {
         throw new ConflictException(
           "El DNI ingresado ya pertenece a otra cuenta",
         );
       }
-      throw err;
-    }
 
-    const payload = {
-      email: usuario.email,
-      sub: usuario.id,
-      rol: usuario.rol,
-      roles: [usuario.rol],
-    };
+      const passwordHash = await bcrypt.hash(registerDto.password, 10);
+      const usuario = queryRunner.manager.create(Usuario, {
+        email: registerDto.email,
+        password_hash: passwordHash,
+        rol: RolUsuario.TURISTA,
+        estado: true,
+      });
+      await queryRunner.manager.save(usuario);
 
-    return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: usuario.id,
+      const cliente = queryRunner.manager.create(Cliente, {
+        dni: registerDto.dni,
+        nombre_completo: registerDto.nombre_completo,
+        telefono: registerDto.telefono ?? null,
+        usuario,
+      });
+      await queryRunner.manager.save(cliente);
+
+      await queryRunner.commitTransaction();
+
+      const payload = {
         email: usuario.email,
+        sub: usuario.id,
         rol: usuario.rol,
-      },
-    };
+        roles: [usuario.rol],
+      };
+
+      return {
+        access_token: this.jwtService.sign(payload),
+        user: {
+          id: usuario.id,
+          email: usuario.email,
+          rol: usuario.rol,
+        },
+      };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      // Si algún unique constraint saltó en carrera (email o DNI), responder 409.
+      if (String(err?.code) === "23505") {
+        const constraint = String(err?.constraint ?? "");
+        if (constraint.includes("dni") || constraint.includes("cliente")) {
+          throw new ConflictException(
+            "El DNI ingresado ya pertenece a otra cuenta",
+          );
+        }
+        throw new ConflictException("El email ya está registrado");
+      }
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }
