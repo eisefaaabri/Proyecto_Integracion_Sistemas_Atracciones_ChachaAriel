@@ -114,22 +114,52 @@ export class AtraccionesService {
     };
   }
 
-  async reserve(id: string, idempotencyKey: string, dto: ReservationRequestDto): Promise<ReservationResponseDto> {
+  async reserve(id: string, usuarioId: string, idempotencyKey: string, dto: ReservationRequestDto): Promise<ReservationResponseDto> {
     const atraccion = await this.findOne(id);
-    const reserva = this.reservaRepository.create({
-      fecha_reserva: dto.date,
-      estado_reserva: EstadoReserva.CONFIRMADA
-    });
-    await this.reservaRepository.save(reserva);
-    return {
-      reservation_id: reserva.id,
-      status: 'CONFIRMED' as any,
-      ticket_count: dto.ticket_count,
-      total_price: { currency: 'USD', total: atraccion.precio_base * dto.ticket_count },
-      atraccion_id: id,
-      date: dto.date,
-      customer_name: dto.customer_name
-    };
+    const cliente = await this.clienteRepository.findOne({ where: { usuario: { id: usuarioId } } });
+    if (!cliente) throw new NotFoundException('Cliente no encontrado o no asociado al usuario');
+
+    // Transacción para Reserva y Factura
+    const queryRunner = this.reservaRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const reserva = this.reservaRepository.create({
+        fecha_reserva: dto.date,
+        estado_reserva: EstadoReserva.PENDIENTE,
+        cliente
+      });
+      await queryRunner.manager.save(reserva);
+
+      const totalCalculado = atraccion.precio_base * dto.ticket_count;
+      const factura = this.facturaRepository.create({
+        numero_factura: `FAC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        fecha_emision: new Date().toISOString().split('T')[0],
+        ruc_cliente: '9999999999999', // Por defecto o tomar del cliente si existiese
+        estado_pago: EstadoPago.PENDIENTE,
+        total_pagado: totalCalculado,
+        reserva,
+        cliente
+      });
+      await queryRunner.manager.save(factura);
+      await queryRunner.commitTransaction();
+
+      return {
+        reservation_id: reserva.id,
+        status: 'PENDING' as any,
+        ticket_count: dto.ticket_count,
+        total_price: { currency: 'USD', total: totalCalculado },
+        atraccion_id: id,
+        date: dto.date,
+        customer_name: dto.customer_name
+      };
+    } catch (err: any) {
+      await queryRunner.rollbackTransaction();
+      throw new BadRequestException(err.message || 'Error desconocido');
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async cancelReservation(reservationId: string, dto: CancelReservationRequestDto, idempotencyKey: string) {

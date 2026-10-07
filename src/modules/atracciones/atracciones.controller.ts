@@ -335,8 +335,10 @@ export class AtraccionesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Headers('idempotency-key') idempotencyKey: string,
     @Body() reservationDto: ReservationRequestDto,
+    @Req() req: Request,
   ) {
-    return this.atraccionesService.reserve(id, idempotencyKey, reservationDto);
+    const usuarioId = (req.user as any).userId;
+    return this.atraccionesService.reserve(id, usuarioId, idempotencyKey, reservationDto);
   }
 
   // ==========================================
@@ -346,6 +348,7 @@ export class AtraccionesController {
   @ApiOperation({ summary: 'Dejar una reseña sobre una atracción' })
   @ApiParam({ name: 'id', format: 'uuid', description: 'ID de la atracción' })
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Post(':id/reviews')
   @HttpCode(HttpStatus.CREATED)
   async createReview(
@@ -370,6 +373,7 @@ export class AtraccionesController {
   @ApiTags('Catálogo')
   @ApiOperation({ summary: 'Subir fotografía para la atracción (Multipart)' })
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Post(':id/photos')
   async uploadPhoto(@Param('id', ParseUUIDPipe) id: string, @Body() body: PhotoUploadDto) {
     return this.atraccionesService.updatePhoto(id, body.url);
@@ -381,6 +385,7 @@ export class AtraccionesController {
   @ApiTags('Wishlist')
   @ApiOperation({ summary: 'Añadir atracción a favoritos' })
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Post('/users/me/wishlist/:atraccionId')
   @HttpCode(HttpStatus.CREATED)
   async addToWishlist(
@@ -394,6 +399,7 @@ export class AtraccionesController {
   @ApiTags('Wishlist')
   @ApiOperation({ summary: 'Eliminar atracción de favoritos' })
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Delete('/users/me/wishlist/:atraccionId')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeFromWishlist(
@@ -410,6 +416,7 @@ export class AtraccionesController {
   @ApiTags('Pagos')
   @ApiOperation({ summary: 'Procesar el pago de una reserva' })
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Post('/reservations/:reservationId/pay')
   async processPayment(
     @Param('reservationId', ParseUUIDPipe) reservationId: string,
