@@ -15,11 +15,17 @@ import {
   Header,
   Headers,
   UseGuards,
+  BadRequestException,
+  Req,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { AtraccionesService } from './atracciones.service';
 import { CreateAtraccionDto } from './dto/create-atraccion.dto';
 import { UpdateAtraccionDto } from './dto/update-atraccion.dto';
+import { ReviewRequestDto } from './dto/review-request.dto';
+import { PaymentRequestDto } from './dto/payment-request.dto';
+import { PhotoUploadDto } from './dto/photo-upload.dto';
+
 import {
   ApiTags,
   ApiOperation,
@@ -45,7 +51,7 @@ import { ErrorDto } from '../../common/dto/error.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ApiBearerAuth } from '@nestjs/swagger';
 
-@ApiTags('Atracciones - Catálogo')
+@ApiTags('Catálogo')
 @Controller('atracciones')
 export class AtraccionesController {
   constructor(private readonly atraccionesService: AtraccionesService) {}
@@ -92,7 +98,7 @@ export class AtraccionesController {
   @Get('reservations')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiTags('Atracciones - Reservas')
+  @ApiTags('Reservas')
   @ApiOperation({ summary: 'Historial de reservas del usuario' })
   @ApiResponse({
     status: 200,
@@ -100,13 +106,13 @@ export class AtraccionesController {
     type: [ReservationResponseDto],
   })
   async getReservations() {
-    return this.atraccionesService.getReservations();
+    return this.atraccionesService.getReservations({});
   }
 
   @Get('reservations/:reservationId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiTags('Atracciones - Reservas')
+  @ApiTags('Reservas')
   @ApiOperation({ summary: 'Obtener detalle de una reserva específica' })
   @ApiParam({
     name: 'reservationId',
@@ -130,7 +136,7 @@ export class AtraccionesController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard, IdempotencyKeyGuard)
   @ApiBearerAuth()
-  @ApiTags('Atracciones - Reservas')
+  @ApiTags('Reservas')
   @ApiOperation({ summary: 'Cancelar una reserva existente' })
   @ApiParam({
     name: 'reservationId',
@@ -309,7 +315,7 @@ export class AtraccionesController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(JwtAuthGuard, IdempotencyKeyGuard)
   @ApiBearerAuth()
-  @ApiTags('Atracciones - Reservas')
+  @ApiTags('Reservas')
   @ApiOperation({ summary: 'Crear una reserva de la atracción' })
   @ApiParam({
     name: 'id',
@@ -330,6 +336,85 @@ export class AtraccionesController {
     @Headers('idempotency-key') idempotencyKey: string,
     @Body() reservationDto: ReservationRequestDto,
   ) {
-    return this.atraccionesService.reserve(id, reservationDto, idempotencyKey);
+    return this.atraccionesService.reserve(id, idempotencyKey, reservationDto);
+  }
+
+  // ==========================================
+  // REVIEWS & SOCIAL PROOF
+  // ==========================================
+  @ApiTags('Reseñas')
+  @ApiOperation({ summary: 'Dejar una reseña sobre una atracción' })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'ID de la atracción' })
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/reviews')
+  @HttpCode(HttpStatus.CREATED)
+  async createReview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ReviewRequestDto,
+    @Req() req: Request,
+  ) {
+    const usuarioId = (req.user as any).userId;
+    return this.atraccionesService.createReview(id, usuarioId, body.score, body.comment);
+  }
+
+  @ApiTags('Reseñas')
+  @ApiOperation({ summary: 'Obtener reseñas de una atracción' })
+  @Get(':id/reviews')
+  async getReviews(@Param('id', ParseUUIDPipe) id: string) {
+    return this.atraccionesService.getReviews(id);
+  }
+
+  // ==========================================
+  // MULTIMEDIA / IMAGES
+  // ==========================================
+  @ApiTags('Catálogo')
+  @ApiOperation({ summary: 'Subir fotografía para la atracción (Multipart)' })
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/photos')
+  async uploadPhoto(@Param('id', ParseUUIDPipe) id: string, @Body() body: PhotoUploadDto) {
+    return this.atraccionesService.updatePhoto(id, body.url);
+  }
+
+  // ==========================================
+  // WISHLIST / FAVORITOS
+  // ==========================================
+  @ApiTags('Wishlist')
+  @ApiOperation({ summary: 'Añadir atracción a favoritos' })
+  @UseGuards(JwtAuthGuard)
+  @Post('/users/me/wishlist/:atraccionId')
+  @HttpCode(HttpStatus.CREATED)
+  async addToWishlist(
+    @Param('atraccionId', ParseUUIDPipe) atraccionId: string,
+    @Req() req: Request,
+  ) {
+    const usuarioId = (req.user as any).userId;
+    return this.atraccionesService.addToWishlist(usuarioId, atraccionId);
+  }
+
+  @ApiTags('Wishlist')
+  @ApiOperation({ summary: 'Eliminar atracción de favoritos' })
+  @UseGuards(JwtAuthGuard)
+  @Delete('/users/me/wishlist/:atraccionId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeFromWishlist(
+    @Param('atraccionId', ParseUUIDPipe) atraccionId: string,
+    @Req() req: Request,
+  ) {
+    const usuarioId = (req.user as any).userId;
+    return this.atraccionesService.removeFromWishlist(usuarioId, atraccionId);
+  }
+
+  // ==========================================
+  // PAYMENTS / PAGOS
+  // ==========================================
+  @ApiTags('Pagos')
+  @ApiOperation({ summary: 'Procesar el pago de una reserva' })
+  @UseGuards(JwtAuthGuard)
+  @Post('/reservations/:reservationId/pay')
+  async processPayment(
+    @Param('reservationId', ParseUUIDPipe) reservationId: string,
+    @Body() body: PaymentRequestDto,
+  ) {
+    return this.atraccionesService.processPayment(reservationId, body.card_token, body.method);
   }
 }

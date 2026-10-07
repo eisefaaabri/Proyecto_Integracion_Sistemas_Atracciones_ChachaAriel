@@ -16,7 +16,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
-    defaultVersion: '1',
+    defaultVersion: '2',
   });
 
   // CORS dinámico
@@ -51,7 +51,7 @@ async function bootstrap() {
       'garantizar operaciones idempotentes y evitar reservas o cancelaciones duplicadas.\n' +
       'Los errores siguen el estándar RFC 7807 (application/problem+json).',
     )
-    .setVersion('1.2.0')
+    .setVersion('2.0.0')
     .addOAuth2({
       type: 'oauth2',
       flows: {
@@ -77,3 +77,5 @@ async function bootstrap() {
   await app.listen(port);
 }
 bootstrap();
+
+// force restart

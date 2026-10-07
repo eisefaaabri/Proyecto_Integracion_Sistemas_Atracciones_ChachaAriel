@@ -22,6 +22,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       ? (errorResponse as any).message || (errorResponse as any).detail || errorResponse
       : errorResponse;
 
+    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+      console.error('Unhandled Exception:', exception);
+    }
+
     response
       .status(status)
       .json({
