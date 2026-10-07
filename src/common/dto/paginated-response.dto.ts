@@ -1,10 +1,10 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from "@nestjs/swagger";
 
 export class PaginatedResponseDto<T> {
-  @ApiProperty({ description: 'Datos devueltos de la página actual' })
+  @ApiProperty({ description: "Datos devueltos de la página actual" })
   data: T[];
 
-  @ApiProperty({ description: 'Información de metadatos de la paginación' })
+  @ApiProperty({ description: "Información de metadatos de la paginación" })
   meta: {
     totalItems: number;
     itemCount: number;
@@ -13,7 +13,7 @@ export class PaginatedResponseDto<T> {
     currentPage: number;
   };
 
-  @ApiProperty({ description: 'HATEOAS links para navegación' })
+  @ApiProperty({ description: "HATEOAS links para navegación" })
   _links: {
     first: string;
     previous?: string;

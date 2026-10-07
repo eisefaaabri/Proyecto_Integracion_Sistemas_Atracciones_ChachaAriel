@@ -1,19 +1,28 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
-import { Min, Max } from 'class-validator';
-import { Atraccion } from './atraccion.entity';
-import { Cliente } from './cliente.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  Index,
+} from "typeorm";
+import { Min, Max } from "class-validator";
+import { Atraccion } from "./atraccion.entity";
+import { Cliente } from "./cliente.entity";
 
-@Entity('resenas')
+@Entity("resenas")
 export class Resena {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @Column({ type: 'int' })
+  @Column({ type: "int" })
   @Min(1)
   @Max(5)
   score: number;
 
-  @Column({ type: 'text' })
+  @Column({ type: "text" })
   comment: string;
 
   @CreateDateColumn()
@@ -23,11 +32,11 @@ export class Resena {
   updated_at: Date;
 
   @Index()
-  @ManyToOne(() => Atraccion, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'atraccion_id' })
+  @ManyToOne(() => Atraccion, { onDelete: "CASCADE" })
+  @JoinColumn({ name: "atraccion_id" })
   atraccion: Atraccion;
 
-  @ManyToOne(() => Cliente, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'cliente_id' })
+  @ManyToOne(() => Cliente, { onDelete: "CASCADE" })
+  @JoinColumn({ name: "cliente_id" })
   cliente: Cliente;
 }

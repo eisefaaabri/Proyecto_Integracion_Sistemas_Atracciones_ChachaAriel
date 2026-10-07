@@ -1,7 +1,7 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from "@nestjs/swagger";
 
 export class AtraccionResponseDto {
-  @ApiProperty({ format: 'uuid' })
+  @ApiProperty({ format: "uuid" })
   id: string;
 
   @ApiProperty()
@@ -18,4 +18,19 @@ export class AtraccionResponseDto {
 
   @ApiProperty()
   codigo_aeropuerto: string;
+
+  @ApiProperty({ required: false })
+  foto_url?: string;
+
+  @ApiProperty({ required: false })
+  estado?: string;
+
+  @ApiProperty({ required: false })
+  duracion_horas?: number;
+
+  @ApiProperty({ required: false, type: [String] })
+  incluye?: string[];
+
+  @ApiProperty({ required: false })
+  itinerario?: string;
 }

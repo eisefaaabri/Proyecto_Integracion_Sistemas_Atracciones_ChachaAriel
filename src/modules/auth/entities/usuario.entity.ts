@@ -1,27 +1,38 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToOne, Index } from 'typeorm';
-import { IsEmail, IsNotEmpty } from 'class-validator';
-import { Cliente } from '../../atracciones/entities/cliente.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToOne,
+  Index,
+} from "typeorm";
+import { IsEmail, IsNotEmpty } from "class-validator";
+import { Cliente } from "../../atracciones/entities/cliente.entity";
 
-export enum RolUsuario { ADMIN = 'ADMIN', TURISTA = 'TURISTA' }
+export enum RolUsuario {
+  ADMIN = "ADMIN",
+  TURISTA = "TURISTA",
+}
 
-@Entity('usuarios')
+@Entity("usuarios")
 export class Usuario {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Index({ unique: true })
-  @Column({ type: 'varchar', length: 255, unique: true })
+  @Column({ type: "varchar", length: 255, unique: true })
   @IsEmail()
   email: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: "varchar", length: 255 })
   @IsNotEmpty()
   password_hash: string;
 
-  @Column({ type: 'enum', enum: RolUsuario, default: RolUsuario.TURISTA })
+  @Column({ type: "enum", enum: RolUsuario, default: RolUsuario.TURISTA })
   rol: RolUsuario;
 
-  @Column({ type: 'boolean', default: true })
+  @Column({ type: "boolean", default: true })
   estado: boolean;
 
   @CreateDateColumn()

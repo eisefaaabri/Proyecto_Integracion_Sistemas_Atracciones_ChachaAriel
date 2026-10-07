@@ -1,10 +1,10 @@
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { ConfigService } from '@nestjs/config';
-import helmet from 'helmet';
-import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+import { ValidationPipe, VersioningType } from "@nestjs/common";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { ConfigService } from "@nestjs/config";
+import helmet from "helmet";
+import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,17 +13,17 @@ async function bootstrap() {
   // Helmet para cabeceras de seguridad y ocultar X-Powered-By
   app.use(helmet());
 
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix("api");
   app.enableVersioning({
     type: VersioningType.URI,
-    defaultVersion: '2',
+    defaultVersion: "2",
   });
 
   // CORS dinámico
-  const frontendUrl = configService.get<string>('FRONTEND_URL') || '*';
+  const frontendUrl = configService.get<string>("FRONTEND_URL") || "*";
   app.enableCors({
     origin: frontendUrl,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
     credentials: true,
   });
 
@@ -42,27 +42,27 @@ async function bootstrap() {
   );
 
   const config = new DocumentBuilder()
-    .setTitle('API de Atracciones Turísticas')
+    .setTitle("API de Atracciones Turísticas")
     .setDescription(
-      'Microservicio de Atracciones del Marketplace Turístico.\n' +
-      'Gestiona el catálogo de tours (GUIDED_TOUR), paquetes (PACKAGE) y entradas individuales (SINGLE_TICKET),\n' +
-      'la disponibilidad de cupos y el ciclo de vida transaccional completo de las reservas.\n\n' +
-      'Todos los endpoints transaccionales exigen la cabecera `Idempotency-Key` (UUID v4) para\n' +
-      'garantizar operaciones idempotentes y evitar reservas o cancelaciones duplicadas.\n' +
-      'Los errores siguen el estándar RFC 7807 (application/problem+json).',
+      "Microservicio de Atracciones del Marketplace Turístico.\n" +
+        "Gestiona el catálogo de tours (GUIDED_TOUR), paquetes (PACKAGE) y entradas individuales (SINGLE_TICKET),\n" +
+        "la disponibilidad de cupos y el ciclo de vida transaccional completo de las reservas.\n\n" +
+        "Todos los endpoints transaccionales exigen la cabecera `Idempotency-Key` (UUID v4) para\n" +
+        "garantizar operaciones idempotentes y evitar reservas o cancelaciones duplicadas.\n" +
+        "Los errores siguen el estándar RFC 7807 (application/problem+json).",
     )
-    .setVersion('2.0.0')
+    .setVersion("2.0.0")
     .addOAuth2({
-      type: 'oauth2',
+      type: "oauth2",
       flows: {
         authorizationCode: {
-          authorizationUrl: 'https://auth.booking-hub.com/oauth2/authorize',
-          tokenUrl: 'https://auth.booking-hub.com/oauth2/token',
+          authorizationUrl: "https://auth.booking-hub.com/oauth2/authorize",
+          tokenUrl: "https://auth.booking-hub.com/oauth2/token",
           scopes: {
-            'attractions:read': 'Leer catálogo y detalles',
-            'attractions:book': 'Hacer reservas',
-            'attractions:write': 'Crear y mantener inventario',
-            'attractions:cancel': 'Cancelar reservas',
+            "attractions:read": "Leer catálogo y detalles",
+            "attractions:book": "Hacer reservas",
+            "attractions:write": "Crear y mantener inventario",
+            "attractions:cancel": "Cancelar reservas",
           },
         },
       },
@@ -71,9 +71,9 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup("api/docs", app, document);
 
-  const port = configService.get<number>('PORT', 3000);
+  const port = configService.get<number>("PORT", 3000);
   await app.listen(port);
 }
 bootstrap();

@@ -1,33 +1,54 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, OneToMany, Index } from 'typeorm';
-import { Min } from 'class-validator';
-import { DetalleReserva } from './detalle-reserva.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  DeleteDateColumn,
+  OneToMany,
+  Index,
+} from "typeorm";
+import { Min } from "class-validator";
+import { DetalleReserva } from "./detalle-reserva.entity";
 
-@Entity('atracciones')
+@Entity("atracciones")
 export class Atraccion {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Index()
-  @Column({ type: 'varchar', length: 150 })
+  @Column({ type: "varchar", length: 150 })
   nombre: string;
 
-  @Column({ type: 'text' })
+  @Column({ type: "text" })
   descripcion: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  @Column({ type: "decimal", precision: 10, scale: 2 })
   @Min(0)
   precio_base: number;
 
-  @Column({ type: 'int' })
+  @Column({ type: "int" })
   @Min(1)
   capacidad_diaria: number;
 
   @Index()
-  @Column({ type: 'varchar', length: 10 })
+  @Column({ type: "varchar", length: 10 })
   codigo_aeropuerto: string;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ type: "text", nullable: true })
   foto_url: string;
+
+  @Column({ type: "varchar", length: 20, default: "ACTIVA" })
+  estado: string;
+
+  @Column({ type: "decimal", precision: 5, scale: 2, nullable: true })
+  duracion_horas: number;
+
+  @Column({ type: "jsonb", nullable: true })
+  incluye: string[];
+
+  @Column({ type: "text", nullable: true })
+  itinerario: string;
 
   @CreateDateColumn()
   created_at: Date;

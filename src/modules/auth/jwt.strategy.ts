@@ -1,24 +1,36 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { PassportStrategy } from "@nestjs/passport";
+import { ExtractJwt, Strategy } from "passport-jwt";
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private readonly configService: ConfigService) {
+    const secret = configService.get<string>("JWT_SECRET");
+    if (!secret && configService.get<string>("NODE_ENV") === "production") {
+      throw new Error("JWT_SECRET es obligatorio cuando NODE_ENV=production");
+    }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET', 'fallback_secret_for_dev_only_123'),
+      secretOrKey: secret || "fallback_secret_for_dev_only_123",
     });
   }
 
   async validate(payload: any) {
-    if (!payload) {
-      throw new UnauthorizedException('Token inválido o expirado');
+    if (!payload?.sub) {
+      throw new UnauthorizedException("Token inválido o expirado");
     }
-    // En un sistema real aquí se buscaría al usuario en la BD o se validarían scopes/roles.
-    // Para el microservicio, devolvemos el payload para usarlo en el request.
-    return { userId: payload.sub, email: payload.email, roles: payload.roles };
+    // Acepta tokens emitidos con `roles` (array) o `rol` (único).
+    const rawRoles = Array.isArray(payload.roles)
+      ? payload.roles
+      : payload.rol
+        ? [payload.rol]
+        : [];
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      roles: rawRoles.map(String).map((r) => r.toUpperCase()),
+    };
   }
 }

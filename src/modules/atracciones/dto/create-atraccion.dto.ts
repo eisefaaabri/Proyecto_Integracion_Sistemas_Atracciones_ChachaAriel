@@ -1,5 +1,14 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNumber, Min, IsNotEmpty, MaxLength, IsOptional } from 'class-validator';
+import { ApiProperty } from "@nestjs/swagger";
+import {
+  IsString,
+  IsNumber,
+  Min,
+  IsNotEmpty,
+  MaxLength,
+  IsOptional,
+  IsArray,
+  IsEnum,
+} from "class-validator";
 
 export class CreateAtraccionDto {
   @ApiProperty()
@@ -33,4 +42,28 @@ export class CreateAtraccionDto {
   @IsString()
   @IsOptional()
   foto_url?: string;
+
+  @ApiProperty({
+    required: false,
+    enum: ["ACTIVA", "INACTIVA", "MANTENIMIENTO"],
+  })
+  @IsEnum(["ACTIVA", "INACTIVA", "MANTENIMIENTO"])
+  @IsOptional()
+  estado?: string;
+
+  @ApiProperty({ required: false })
+  @IsNumber()
+  @IsOptional()
+  duracion_horas?: number;
+
+  @ApiProperty({ required: false, type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  incluye?: string[];
+
+  @ApiProperty({ required: false })
+  @IsString()
+  @IsOptional()
+  itinerario?: string;
 }

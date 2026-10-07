@@ -15,12 +15,12 @@ info:
     garantizar operaciones idempotentes y evitar reservas o cancelaciones duplicadas.
     Los errores siguen el estándar RFC 7807 (application/problem+json).
   # Versión actual de la API
-  version: 1.2.0
+  version: 2.0.0
 
 # Lista de servidores donde la API está alojada
 servers:
   # URL del entorno local o API Gateway
-  - url: /api/v1
+  - url: /api/v2
     description: API Gateway - Ruta base
 
 # Categorías visuales para agrupar y organizar los endpoints en la documentación
@@ -499,6 +499,137 @@ paths:
                 $ref: '#/components/schemas/ReservationResponse'
         '404':
           $ref: '#/components/responses/ProblemDetails404'
+  /atracciones/{id}/reviews:
+    get:
+      tags:
+        - Atracciones - Reseñas
+      summary: Obtener reseñas de una atracción
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista de reseñas
+    post:
+      tags:
+        - Atracciones - Reseñas
+      summary: Dejar una reseña
+      security:
+        - OAuth2Security:
+          - attractions:read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+      responses:
+        '201':
+          description: Reseña creada exitosamente
+  /atracciones/{id}/photos:
+    post:
+      tags:
+        - Atracciones - Multimedia
+      summary: Subir una imagen a la atracción (Multipart)
+      security:
+        - OAuth2Security:
+          - attractions:write
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Imagen subida y URL generada
+  /users/me/wishlist/{atraccionId}:
+    post:
+      tags:
+        - Usuarios - Wishlist
+      summary: Añadir atracción a favoritos
+      security:
+        - OAuth2Security:
+          - attractions:read
+      parameters:
+        - name: atraccionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Añadida a favoritos
+    delete:
+      tags:
+        - Usuarios - Wishlist
+      summary: Eliminar atracción de favoritos
+      security:
+        - OAuth2Security:
+          - attractions:read
+      parameters:
+        - name: atraccionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Eliminada de favoritos
+  /reservations/{reservationId}/pay:
+    post:
+      tags:
+        - Atracciones - Pagos
+      summary: Procesar pago simulado de una reserva
+      security:
+        - OAuth2Security:
+          - attractions:book
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '200':
+          description: Pago procesado exitosamente (Simulado)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
 
 # Componentes reutilizables. Aquí definimos moldes para no repetir código.
 components:
@@ -870,3 +1001,38 @@ components:
           type: string
           description: Razón de la cancelación
 
+    ReviewRequest:
+      type: object
+      required:
+        - score
+        - comment
+      properties:
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+    PaymentRequest:
+      type: object
+      required:
+        - card_token
+        - method
+      properties:
+        card_token:
+          type: string
+          description: Token simulado de la tarjeta (ej. tok_visa)
+        method:
+          type: string
+          enum: [CREDIT_CARD, PAYPAL]
+    PaymentResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+        status:
+          type: string
+          enum: [SUCCESS, FAILED]
+        receipt_url:
+          type: string
+          format: uri

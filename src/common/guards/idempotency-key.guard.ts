@@ -1,5 +1,11 @@
-import { CanActivate, ExecutionContext, Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { Request } from 'express';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  HttpException,
+  HttpStatus,
+} from "@nestjs/common";
+import { Request } from "express";
 
 /**
  * Guard que exige la cabecera `Idempotency-Key` en formato UUID.
@@ -21,18 +27,19 @@ export class IdempotencyKeyGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
-    const idempotencyKey = request.headers['idempotency-key'] as string | undefined;
+    const idempotencyKey = request.headers["idempotency-key"] as
+      string | undefined;
 
-    if (!idempotencyKey || idempotencyKey.trim() === '') {
+    if (!idempotencyKey || idempotencyKey.trim() === "") {
       throw new HttpException(
         {
-          type: 'https://api.booking-hub.com/errors/missing-idempotency-key',
-          title: 'Idempotency-Key header is required',
+          type: "https://api.booking-hub.com/errors/missing-idempotency-key",
+          title: "Idempotency-Key header is required",
           status: HttpStatus.BAD_REQUEST,
           detail:
-            'All transactional endpoints require an Idempotency-Key header (UUID v4) ' +
-            'to prevent duplicate operations such as double charges.',
-          code: 'VALIDATION_FAILED',
+            "All transactional endpoints require an Idempotency-Key header (UUID v4) " +
+            "to prevent duplicate operations such as double charges.",
+          code: "VALIDATION_FAILED",
         },
         HttpStatus.BAD_REQUEST,
       );
@@ -41,12 +48,11 @@ export class IdempotencyKeyGuard implements CanActivate {
     if (!IdempotencyKeyGuard.UUID_REGEX.test(idempotencyKey)) {
       throw new HttpException(
         {
-          type: 'https://api.booking-hub.com/errors/invalid-idempotency-key',
-          title: 'Invalid Idempotency-Key format',
+          type: "https://api.booking-hub.com/errors/invalid-idempotency-key",
+          title: "Invalid Idempotency-Key format",
           status: HttpStatus.BAD_REQUEST,
-          detail:
-            `The Idempotency-Key header must be a valid UUID v4. Received: "${idempotencyKey}".`,
-          code: 'VALIDATION_FAILED',
+          detail: `The Idempotency-Key header must be a valid UUID v4. Received: "${idempotencyKey}".`,
+          code: "VALIDATION_FAILED",
         },
         HttpStatus.BAD_REQUEST,
       );

@@ -1,4 +1,4 @@
-import { ValueTransformer } from 'typeorm';
+import { ValueTransformer } from "typeorm";
 
 export class ColumnNumericTransformer implements ValueTransformer {
   to(data: number | null): number | null {
