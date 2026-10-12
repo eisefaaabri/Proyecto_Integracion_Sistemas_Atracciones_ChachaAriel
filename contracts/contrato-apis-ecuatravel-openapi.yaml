@@ -1,0 +1,529 @@
+openapi: 3.0.3
+info:
+  title: API Propia - EcuaTravel (Backoffice B2B y Cliente Web)
+  description: |
+    Especificación de APIs propietarias del sistema EcuaTravel.
+    Contiene los endpoints desarrollados internamente para el soporte del portal web,
+    la autenticación de clientes y administradores, la gestión de usuarios en el panel B2B,
+    gestión de reseñas, subida de fotografías, wishlist y pasarela simulada de pagos.
+  version: 1.0.0
+
+servers:
+  - url: /api/v2
+    description: Servidor Local / Gateway v2
+
+tags:
+  - name: Autenticación
+    description: Registro, inicio de sesión e identidad mediante tokens JWT
+  - name: Usuarios - Gestión B2B
+    description: Administración de cuentas y asignación de privilegios de Administrador
+  - name: Atracciones - Reseñas
+    description: Calificaciones y opiniones de turistas sobre atracciones
+  - name: Atracciones - Multimedia
+    description: Carga de recursos multimedia e imágenes
+  - name: Usuarios - Wishlist
+    description: Colección de atracciones favoritas del usuario autenticado
+  - name: Atracciones - Pagos
+    description: Pasarela transaccional simulada de pagos para reservas
+
+paths:
+
+  # -------------------------------------------------------------------------
+  # AUTENTICACIÓN
+  # -------------------------------------------------------------------------
+  /auth/register:
+    post:
+      tags:
+        - Autenticación
+      summary: Registro de nuevo usuario turista
+      description: Crea la cuenta en el sistema (rol TURISTA) y genera su token JWT de sesión.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Usuario registrado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '409':
+          description: El email o DNI ya se encuentra registrado
+
+  /auth/login:
+    post:
+      tags:
+        - Autenticación
+      summary: Inicio de sesión
+      description: Valida credenciales y retorna el token JWT junto con los datos de rol del usuario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Autenticación exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Credenciales inválidas
+        '429':
+          description: Límite de intentos de login excedido (Rate Limit)
+
+  # -------------------------------------------------------------------------
+  # USUARIOS - GESTIÓN B2B (Solo Administradores)
+  # -------------------------------------------------------------------------
+  /auth/users:
+    get:
+      tags:
+        - Usuarios - Gestión B2B
+      summary: Listar todos los usuarios
+      description: Retorna la lista completa de usuarios registrados, incluyendo rol y datos de contacto.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Lista de usuarios recuperada exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: No autenticado
+        '403':
+          description: Acceso denegado (Requiere rol ADMIN)
+
+    post:
+      tags:
+        - Usuarios - Gestión B2B
+      summary: Crear un nuevo usuario con rol específico
+      description: Permite a un administrador crear usuarios directamente asignando rol ADMIN o TURISTA.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Usuario creado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '401':
+          description: No autenticado
+        '403':
+          description: Acceso denegado (Requiere rol ADMIN)
+        '409':
+          description: El email o DNI ya se encuentra registrado
+
+  /auth/users/{id}/role:
+    patch:
+      tags:
+        - Usuarios - Gestión B2B
+      summary: Actualizar rol de un usuario
+      description: Permite promover a un usuario a ADMIN o revocar privilegios a TURISTA.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRoleRequest'
+      responses:
+        '200':
+          description: Rol actualizado correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: No autenticado
+        '403':
+          description: Acceso denegado
+        '404':
+          description: Usuario no encontrado
+
+  # -------------------------------------------------------------------------
+  # RESEÑAS
+  # -------------------------------------------------------------------------
+  /atracciones/{id}/reviews:
+    get:
+      tags:
+        - Atracciones - Reseñas
+      summary: Obtener reseñas de una atracción
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista de opiniones y calificaciones
+    post:
+      tags:
+        - Atracciones - Reseñas
+      summary: Dejar una reseña sobre una atracción
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+      responses:
+        '201':
+          description: Reseña publicada exitosamente
+        '401':
+          description: No autenticado
+
+  # -------------------------------------------------------------------------
+  # MULTIMEDIA
+  # -------------------------------------------------------------------------
+  /atracciones/{id}/photos:
+    post:
+      tags:
+        - Atracciones - Multimedia
+      summary: Subir imagen de atracción
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Imagen procesada y URL generada
+        '401':
+          description: No autenticado
+        '403':
+          description: Requiere rol ADMIN
+
+  # -------------------------------------------------------------------------
+  # WISHLIST (FAVORITOS)
+  # -------------------------------------------------------------------------
+  /users/me/wishlist/{atraccionId}:
+    post:
+      tags:
+        - Usuarios - Wishlist
+      summary: Agregar atracción a la lista de deseos
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: atraccionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Añadida exitosamente
+        '401':
+          description: No autenticado
+
+    delete:
+      tags:
+        - Usuarios - Wishlist
+      summary: Quitar atracción de la lista de deseos
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: atraccionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Eliminada exitosamente
+        '401':
+          description: No autenticado
+
+  # -------------------------------------------------------------------------
+  # PAGOS SIMULADOS
+  # -------------------------------------------------------------------------
+  /reservations/{reservationId}/pay:
+    post:
+      tags:
+        - Atracciones - Pagos
+      summary: Procesar pago simulado de una reserva
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '200':
+          description: Transacción aprobada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          $ref: '#/components/responses/ProblemDetails400'
+        '401':
+          description: No autenticado
+
+# ---------------------------------------------------------------------------
+# COMPONENTES Y ESQUEMAS
+# ---------------------------------------------------------------------------
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Ingrese el token JWT obtenido tras iniciar sesión en /auth/login
+
+  responses:
+    ProblemDetails400:
+      description: Solicitud errónea según estándar RFC 7807
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - nombre_completo
+        - dni
+      properties:
+        email:
+          type: string
+          format: email
+          example: turista@ejemplo.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: ClaveSegura123!
+        nombre_completo:
+          type: string
+          example: Andrea Morales
+        dni:
+          type: string
+          pattern: '^\d{7,20}$'
+          example: '1723456789'
+        telefono:
+          type: string
+          example: '+593987654321'
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: admin@ecuatravel.com
+        password:
+          type: string
+          format: password
+          example: admin123
+
+    CreateUserRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: nuevo.admin@ecuatravel.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: AdminPass2026!
+        rol:
+          type: string
+          enum: [ADMIN, TURISTA]
+          default: ADMIN
+        nombre_completo:
+          type: string
+          example: Carlos Administrador
+        dni:
+          type: string
+          pattern: '^\d{7,20}$'
+          example: '1712345678'
+        telefono:
+          type: string
+          example: '+593981234567'
+
+    UpdateUserRoleRequest:
+      type: object
+      required:
+        - rol
+      properties:
+        rol:
+          type: string
+          enum: [ADMIN, TURISTA]
+          example: ADMIN
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: Token de autenticación JWT
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            email:
+              type: string
+            rol:
+              type: string
+              enum: [ADMIN, TURISTA]
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        rol:
+          type: string
+          enum: [ADMIN, TURISTA]
+        estado:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        nombre_completo:
+          type: string
+          nullable: true
+        dni:
+          type: string
+          nullable: true
+        telefono:
+          type: string
+          nullable: true
+
+    ReviewRequest:
+      type: object
+      required:
+        - score
+        - comment
+      properties:
+        score:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+
+    PaymentRequest:
+      type: object
+      required:
+        - card_token
+        - method
+      properties:
+        card_token:
+          type: string
+          description: Token simulado de pasarela
+        method:
+          type: string
+          enum: [CREDIT_CARD, PAYPAL]
+
+    PaymentResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+        status:
+          type: string
+          enum: [SUCCESS, FAILED]
+        receipt_url:
+          type: string
+          format: uri
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri

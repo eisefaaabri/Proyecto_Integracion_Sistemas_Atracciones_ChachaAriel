@@ -1,9 +1,14 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards } from "@nestjs/common";
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Get, Patch, Param } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import { ThrottlerGuard, Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
+import { Roles } from "./roles.decorator";
+import { RolesGuard } from "./roles.guard";
+import { JwtAuthGuard } from "./jwt-auth.guard";
+import { RolUsuario } from "./entities/usuario.entity";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
+import { CreateUserDto } from "./dto/create-user.dto";
 
 @ApiTags("auth")
 @Controller("auth")
@@ -31,5 +36,32 @@ export class AuthController {
   @ApiResponse({ status: 429, description: "Demasiados intentos de login, espera 1 minuto" })
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  @Post("users")
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ADMIN")
+  @ApiOperation({ summary: "Crear un nuevo usuario con rol asignado (solo ADMIN)" })
+  @ApiResponse({ status: 201, description: "Usuario creado con éxito" })
+  @ApiResponse({ status: 409, description: "Email o DNI ya registrado" })
+  async createUser(@Body() createUserDto: CreateUserDto) {
+    return this.authService.createUser(createUserDto);
+  }
+
+  @Get("users")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ADMIN")
+  @ApiOperation({ summary: "Listar todos los usuarios (solo ADMIN)" })
+  async getAllUsers() {
+    return this.authService.getAllUsers();
+  }
+
+  @Patch("users/:id/role")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("ADMIN")
+  @ApiOperation({ summary: "Actualizar el rol de un usuario (solo ADMIN)" })
+  async updateUserRole(@Param("id") id: string, @Body("rol") rol: RolUsuario) {
+    return this.authService.updateUserRole(id, rol);
   }
 }

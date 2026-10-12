@@ -62,7 +62,7 @@ async function bootstrap() {
           "garantizar operaciones idempotentes y evitar reservas o cancelaciones duplicadas.\n" +
           "Los errores siguen el estándar RFC 7807 (application/problem+json).",
       )
-      .setVersion("2.0.0")
+      .setVersion("2.1.0")
       .addOAuth2({
         type: "oauth2",
         flows: {
