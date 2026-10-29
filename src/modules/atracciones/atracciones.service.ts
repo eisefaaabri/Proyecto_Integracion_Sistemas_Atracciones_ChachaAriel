@@ -29,7 +29,7 @@ import {
   ReservationStatus,
 } from "./dto/reservation.dto";
 
-const BOOKABLE_STATES: EstadoReserva[] = [
+export const BOOKABLE_STATES: EstadoReserva[] = [
   EstadoReserva.PENDIENTE,
   EstadoReserva.CONFIRMADA,
 ];

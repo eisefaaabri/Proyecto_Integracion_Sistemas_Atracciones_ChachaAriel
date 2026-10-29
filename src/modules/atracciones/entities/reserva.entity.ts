@@ -20,6 +20,18 @@ export enum EstadoReserva {
   CANCELADA = "CANCELADA",
 }
 
+export enum CanalReserva {
+  WEB = "WEB",
+  BOOKING = "BOOKING",
+}
+
+export interface Pasajeros {
+  adultos: number;
+  ninos: number;
+  seniors: number;
+  infantes: number;
+}
+
 @Entity("reservas")
 export class Reserva {
   @PrimaryGeneratedColumn("uuid")
@@ -38,6 +50,36 @@ export class Reserva {
   @Index({ unique: true })
   @Column({ type: "uuid", unique: true, nullable: true })
   idempotency_key: string;
+
+  @Column({ type: "varchar", length: 20, default: CanalReserva.WEB })
+  canal: CanalReserva;
+
+  @Index({ unique: true })
+  @Column({ type: "varchar", length: 20, unique: true, nullable: true })
+  codigo_reserva: string;
+
+  // HH:mm (24 h)
+  @Column({ type: "varchar", length: 5, nullable: true })
+  hora_turno: string;
+
+  @Column({ type: "varchar", length: 40, nullable: true })
+  slot_id: string;
+
+  @Index()
+  @Column({ type: "varchar", length: 100, nullable: true })
+  booking_reservation_id: string;
+
+  @Column({ type: "varchar", length: 100, nullable: true })
+  correlation_id: string;
+
+  @Column({ type: "varchar", length: 150, nullable: true })
+  contacto_email: string;
+
+  @Column({ type: "text", nullable: true })
+  solicitudes_especiales: string;
+
+  @Column({ type: "jsonb", nullable: true })
+  pasajeros: Pasajeros;
 
   @CreateDateColumn()
   created_at: Date;

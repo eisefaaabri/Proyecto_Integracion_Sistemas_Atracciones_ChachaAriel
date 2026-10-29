@@ -2,6 +2,9 @@ import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { AtraccionesService } from "./atracciones.service";
 import { AtraccionesController } from "./atracciones.controller";
+import { IntegracionBookingController } from "./integracion-booking.controller";
+import { IntegracionBookingService } from "./integracion-booking.service";
+import { ApiKeyGuard } from "../../common/guards/api-key.guard";
 import { Atraccion } from "./entities/atraccion.entity";
 import { Cliente } from "./entities/cliente.entity";
 import { Reserva } from "./entities/reserva.entity";
@@ -25,7 +28,12 @@ import { RolesGuard } from "../auth/roles.guard";
     ]),
     CommonModule,
   ],
-  controllers: [AtraccionesController],
-  providers: [AtraccionesService, RolesGuard],
+  controllers: [AtraccionesController, IntegracionBookingController],
+  providers: [
+    AtraccionesService,
+    IntegracionBookingService,
+    RolesGuard,
+    ApiKeyGuard,
+  ],
 })
 export class AtraccionesModule {}

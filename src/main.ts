@@ -1,42 +1,68 @@
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
-import { ValidationPipe, VersioningType } from "@nestjs/common";
+import { ValidationPipe, VersioningType, Logger } from "@nestjs/common";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { ConfigService } from "@nestjs/config";
 import helmet from "helmet";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
+import { correlationIdMiddleware } from "./common/middleware/correlation-id.middleware";
 
 async function bootstrap() {
+  const logger = new Logger("Bootstrap");
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
-  // Helmet para cabeceras de seguridad y ocultar X-Powered-By
-  app.use(helmet());
+  // 1. Apagado Limpio (Graceful Shutdown)
+  app.enableShutdownHooks();
 
+  app.use(correlationIdMiddleware);
+
+  // 2. Helmet para cabeceras de seguridad permitiendo Swagger UI
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+
+  // 3. Prefijo Global y Soporte Multi-versión (v2 para frontend legacy, v3 para Booking Prototipo)
   app.setGlobalPrefix("api");
   app.enableVersioning({
     type: VersioningType.URI,
-    defaultVersion: "2",
+    defaultVersion: ["2", "3"],
   });
 
-  // CORS dinámico: en producción FRONTEND_URL es obligatorio (origen exacto del frontend).
-  let frontendUrl = configService.get<string>("FRONTEND_URL");
-  const isProduction = configService.get<string>("NODE_ENV") === "production";
-  if (isProduction && !frontendUrl) {
-    throw new Error(
-      "En producción FRONTEND_URL es obligatorio: URL exacta del frontend para CORS.",
-    );
-  }
-  if (!frontendUrl) frontendUrl = "*";
+  // 4. CORS Habilitado para Red Tailscale (100.x.x.x) y Desarrollo Local
   app.enableCors({
-    origin: frontendUrl,
+    origin: true,
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
     credentials: true,
+    allowedHeaders: [
+      "Origin",
+      "X-Requested-With",
+      "Content-Type",
+      "Accept",
+      "Authorization",
+      "Idempotency-Key",
+      "X-Correlation-Id",
+      "x-correlation-id",
+      "X-API-Key",
+      "X-Node-Id",
+      "Cache-Control",
+      "Pragma",
+    ],
+    exposedHeaders: [
+      "Location",
+      "X-Correlation-Id",
+      "Idempotency-Key",
+      "X-API-Deprecation-Date",
+    ],
   });
 
-  // Filtro Global de Excepciones
+  // 5. Filtro Global de Excepciones (RFC 7807 Problem Details)
   app.useGlobalFilters(new HttpExceptionFilter());
 
+  // 6. Validación Global de DTOs con saneamiento
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -48,51 +74,65 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger por defecto solo en desarrollo/pre-producción.
-  // En producción se puede forzar con SWAGGER_ENABLED=true (env).
-  const swaggerEnabled = configService.get<string>("SWAGGER_ENABLED") === "true";
+  // 7. Documentación OpenAPI / Swagger v3.0.0
+  const swaggerEnabled =
+    configService.get<string>("SWAGGER_ENABLED", "true") === "true";
+  const isProduction = configService.get<string>("NODE_ENV") === "production";
   if (!isProduction || swaggerEnabled) {
     const config = new DocumentBuilder()
-      .setTitle("API de Atracciones Turísticas")
+      .setTitle("API de Atracciones Turísticas — Integración RDA2")
       .setDescription(
-        "Microservicio de Atracciones del Marketplace Turístico.\n" +
-          "Gestiona el catálogo de tours (GUIDED_TOUR), paquetes (PACKAGE) y entradas individuales (SINGLE_TICKET),\n" +
-          "la disponibilidad de cupos y el ciclo de vida transaccional completo de las reservas.\n\n" +
-          "Todos los endpoints transaccionales exigen la cabecera `Idempotency-Key` (UUID v4) para\n" +
-          "garantizar operaciones idempotentes y evitar reservas o cancelaciones duplicadas.\n" +
-          "Los errores siguen el estándar RFC 7807 (application/problem+json).",
+        "Microservicio de Atracciones (Ecuatravel) integrado con Booking Prototipo.\n" +
+          "Gestiona el catálogo de tours, disponibilidad de aforo en tiempo real y transacciones de reserva.\n\n" +
+          "Endpoints de reserva exigen la cabecera `Idempotency-Key` (UUID v4) y propagan `X-Correlation-Id`.",
       )
-      .setVersion("2.1.0")
-      .addOAuth2({
-        type: "oauth2",
-        flows: {
-          authorizationCode: {
-            authorizationUrl: "https://auth.booking-hub.com/oauth2/authorize",
-            tokenUrl: "https://auth.booking-hub.com/oauth2/token",
-            scopes: {
-              "attractions:read": "Leer catálogo y detalles",
-              "attractions:book": "Hacer reservas",
-              "attractions:write": "Crear y mantener inventario",
-              "attractions:cancel": "Cancelar reservas",
-            },
-          },
-        },
-      })
+      .setVersion("3.0.0")
       .addBearerAuth()
+      .addApiKey(
+        { type: "apiKey", in: "header", name: "X-API-Key" },
+        "ApiKeyAuth",
+      )
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup("api/docs", app, document);
+    SwaggerModule.setup("api/docs", app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    });
   }
 
-  const port = configService.get<number>("PORT", 3000);
-  await app.listen(port);
+  // 8. Escucha explícita en 0.0.0.0 para atender tráfico de Tailscale
+  const port = configService.get<number>("PORT", 3001);
+  const host = configService.get<string>("HOST", "0.0.0.0");
+  const tailscaleIp = configService.get<string>(
+    "TAILSCALE_LOCAL_IP",
+    "100.x.x.x",
+  );
 
-  console.log(
-    `[API] entorno=${isProduction ? "production" : "dev"} puerto=${port} ` +
-      `cors=${frontendUrl}${!isProduction || swaggerEnabled ? " docs=/api/docs" : ""}`,
+  await app.listen(port, host);
+
+  logger.log(
+    "==================================================================",
+  );
+  logger.log(
+    ` Servidor activo en entorno:    ${isProduction ? "production" : "dev"}`,
+  );
+  logger.log(
+    ` Escuchando localmente en:       http://localhost:${port}/api/v3`,
+  );
+  logger.log(
+    ` Enlace Tailscale:              http://${tailscaleIp}:${port}/api/v3`,
+  );
+  logger.log(
+    ` Documentación Swagger en vivo: http://${tailscaleIp}:${port}/api/docs`,
+  );
+  logger.log(
+    ` Healthcheck para Booking:      http://${tailscaleIp}:${port}/api/v3/atracciones/health`,
+  );
+  logger.log(
+    "==================================================================",
   );
 }
-bootstrap();
 
-// force restart
+bootstrap();

@@ -93,13 +93,18 @@ export class AtraccionesController {
   }
 
   @Get("health")
-  @ApiOperation({ summary: "Healthcheck del microservicio" })
+  @ApiOperation({ summary: "Healthcheck del microservicio para Booking Prototipo" })
   @ApiResponse({
     status: 200,
-    description: "Servicio de atracciones operativo.",
+    description: "Servicio de atracciones operativo para monitoreo de la cátedra.",
   })
   checkHealth() {
-    return { status: "UP", timestamp: new Date().toISOString() };
+    return {
+      status: "UP",
+      service_id: process.env.PARTNER_SERVICE_ID || "NODE_ATR_ARIEL",
+      version: "3.0.0",
+      timestamp: new Date().toISOString(),
+    };
   }
 
   @Get("reservations")
