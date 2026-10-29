@@ -6,6 +6,7 @@ import { ConfigService } from "@nestjs/config";
 import helmet from "helmet";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { correlationIdMiddleware } from "./common/middleware/correlation-id.middleware";
+import { buildCorsOptions } from "./common/cors.config";
 
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
@@ -32,32 +33,8 @@ async function bootstrap() {
     defaultVersion: ["2", "3"],
   });
 
-  // 4. CORS Habilitado para Red Tailscale (100.x.x.x) y Desarrollo Local
-  app.enableCors({
-    origin: true,
-    methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
-    credentials: true,
-    allowedHeaders: [
-      "Origin",
-      "X-Requested-With",
-      "Content-Type",
-      "Accept",
-      "Authorization",
-      "Idempotency-Key",
-      "X-Correlation-Id",
-      "x-correlation-id",
-      "X-API-Key",
-      "X-Node-Id",
-      "Cache-Control",
-      "Pragma",
-    ],
-    exposedHeaders: [
-      "Location",
-      "X-Correlation-Id",
-      "Idempotency-Key",
-      "X-API-Deprecation-Date",
-    ],
-  });
+  // 4. CORS restringido a orígenes conocidos (FRONTEND_URL / CORS_ORIGINS)
+  app.enableCors(buildCorsOptions(configService));
 
   // 5. Filtro Global de Excepciones (RFC 7807 Problem Details)
   app.useGlobalFilters(new HttpExceptionFilter());
