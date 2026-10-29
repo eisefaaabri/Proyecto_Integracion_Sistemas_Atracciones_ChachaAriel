@@ -4,6 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  OnApplicationBootstrap,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectDataSource } from "@nestjs/typeorm";
@@ -19,7 +20,8 @@ import {
   Pasajeros,
   Reserva,
 } from "./entities/reserva.entity";
-import { BOOKABLE_STATES, HORARIOS_TURNO } from "./atracciones.service";
+import { BOOKABLE_STATES, HORARIOS_TURNO } from "./reservas.constants";
+import { InventarioBookingClient } from "./inventario-booking.client";
 import {
   CancelBookingReservaDto,
   CheckinBookingReservaDto,
@@ -144,19 +146,30 @@ function horaActualEcuador(): string {
   }).format(new Date());
 }
 
+function sumarDias(fecha: string, dias: number): string {
+  const d = new Date(`${fecha}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
 function slotId(fecha: string, hora24: string): string {
   return `slot-${fecha.replace(/-/g, "")}-${hora24.replace(":", "")}`;
 }
 
 @Injectable()
-export class IntegracionBookingService {
+export class IntegracionBookingService implements OnApplicationBootstrap {
   private readonly logger = new Logger(IntegracionBookingService.name);
   private readonly voucherSecret: string;
+  private readonly diasSincronizacion: number;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly inventario: InventarioBookingClient,
     config: ConfigService,
   ) {
+    this.diasSincronizacion = Number(
+      config.get<string>("BOOKING_GRPC_SYNC_DIAS", "7"),
+    );
     const secret =
       config.get<string>("VOUCHER_SECRET") ?? config.get<string>("JWT_SECRET");
     if (!secret) {
@@ -278,6 +291,7 @@ export class IntegracionBookingService {
       await manager.save(factura);
 
       await queryRunner.commitTransaction();
+      void this.notificarStock(atraccion.id, datos.fecha, correlationId);
 
       reserva.detalles = [{ ...detalle, atraccion }];
       this.log("reserva.booking.confirmada", correlationId, {
@@ -418,7 +432,8 @@ export class IntegracionBookingService {
     dto: CancelBookingReservaDto,
     correlationId: string,
   ) {
-    return this.enTransaccion(
+    let liberada: { atraccionId: string; fecha: string } | null = null;
+    const respuesta = await this.enTransaccion(
       "reserva.booking.cancelacion",
       correlationId,
       async (manager) => {
@@ -457,8 +472,111 @@ export class IntegracionBookingService {
           reason: reserva.cancelacion_motivo,
           tickets_liberados: reserva.detalles?.[0]?.cantidad_boletos ?? 0,
         });
+        const atraccionId = reserva.detalles?.[0]?.atraccion?.id;
+        if (atraccionId) {
+          liberada = {
+            atraccionId,
+            fecha: String(reserva.fecha_reserva).slice(0, 10),
+          };
+        }
         return this.toResponse(reserva);
       },
+    );
+    // Después del commit, para que la lectura del aforo vea los cupos liberados.
+    if (liberada) {
+      void this.notificarStock(
+        liberada.atraccionId,
+        liberada.fecha,
+        correlationId,
+      );
+    }
+    return respuesta;
+  }
+
+  onApplicationBootstrap() {
+    if (this.inventario.habilitado && this.diasSincronizacion > 0) {
+      void this.sincronizarCatalogo();
+    }
+  }
+
+  // Empuja a Booking los cupos de cada turno de esa fecha. Nunca lanza: devuelve
+  // false si Booking no respondió, para que la sincronización masiva se detenga.
+  async notificarStock(
+    atraccionId: string,
+    fecha: string,
+    correlationId?: string,
+  ): Promise<boolean> {
+    if (!this.inventario.habilitado) return true;
+    const timestamp = this.inventario.siguienteTimestamp();
+    try {
+      const disponibilidad = await this.consultarDisponibilidad(atraccionId, {
+        date: fecha,
+      });
+      const acks = await Promise.all(
+        disponibilidad.time_slots.map((turno) =>
+          this.inventario.pushStockUpdate({
+            service_id: this.inventario.serviceId,
+            item_id: atraccionId,
+            date: fecha,
+            time_slot: turno.time,
+            available_units: turno.available_slots,
+            timestamp,
+            slot_id: turno.slot_id,
+          }),
+        ),
+      );
+      this.log("inventario.booking.push", correlationId, {
+        attraction_id: atraccionId,
+        date: fecha,
+        slots: disponibilidad.time_slots.map((t, i) => ({
+          slot_id: t.slot_id,
+          available_units: t.available_slots,
+          ack: acks[i]?.error_code || (acks[i]?.success ? "OK" : "ERROR"),
+        })),
+      });
+      return true;
+    } catch (err) {
+      this.logger.warn(
+        JSON.stringify({
+          event: "inventario.booking.push_fallido",
+          correlation_id: correlationId,
+          attraction_id: atraccionId,
+          date: fecha,
+          grpc_code: err?.code,
+          error: err?.message,
+        }),
+      );
+      return false;
+    }
+  }
+
+  // Ventana de días hacia adelante: tras crear o editar la atracción (cambia el aforo).
+  async sincronizarAtraccion(atraccionId: string): Promise<boolean> {
+    if (!this.inventario.habilitado) return true;
+    const hoy = hoyEcuador();
+    for (let i = 0; i < this.diasSincronizacion; i++) {
+      if (!(await this.notificarStock(atraccionId, sumarDias(hoy, i)))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private async sincronizarCatalogo() {
+    const atracciones = await this.dataSource.manager.find(Atraccion, {
+      where: { estado: "ACTIVA" },
+      select: { id: true },
+    });
+    for (const { id } of atracciones) {
+      if (!(await this.sincronizarAtraccion(id))) {
+        this.logger.warn(
+          "Sincronización inicial de stock con Booking interrumpida: Booking no responde.",
+        );
+        return;
+      }
+    }
+    this.logger.log(
+      `Stock inicial enviado a Booking: ${atracciones.length} atracciones x ${this.diasSincronizacion} días.`,
     );
   }
 
@@ -892,7 +1010,7 @@ export class IntegracionBookingService {
     };
   }
 
-  private log(event: string, correlationId: string, data: object) {
+  private log(event: string, correlationId: string | undefined, data: object) {
     this.logger.log(
       JSON.stringify({ event, correlation_id: correlationId, ...data }),
     );

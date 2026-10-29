@@ -4,6 +4,7 @@ import { AtraccionesService } from "./atracciones.service";
 import { AtraccionesController } from "./atracciones.controller";
 import { IntegracionBookingController } from "./integracion-booking.controller";
 import { DisponibilidadController } from "./disponibilidad.controller";
+import { InventarioBookingClient } from "./inventario-booking.client";
 import { IntegracionBookingService } from "./integracion-booking.service";
 import { ApiKeyGuard } from "../../common/guards/api-key.guard";
 import { Atraccion } from "./entities/atraccion.entity";
@@ -37,6 +38,7 @@ import { RolesGuard } from "../auth/roles.guard";
   providers: [
     AtraccionesService,
     IntegracionBookingService,
+    InventarioBookingClient,
     RolesGuard,
     ApiKeyGuard,
   ],

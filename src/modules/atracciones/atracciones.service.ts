@@ -22,20 +22,14 @@ import { SearchAtraccionesResponseDto } from "./dto/search-response.dto";
 import { PaginationQueryDto } from "../../common/dto/pagination-query.dto";
 import { DetailsRequestDto } from "./dto/details-request.dto";
 import { AvailabilityResponseDto } from "./dto/availability.dto";
+import { BOOKABLE_STATES, HORARIOS_TURNO } from "./reservas.constants";
+import { IntegracionBookingService } from "./integracion-booking.service";
 import {
   ReservationRequestDto,
   ReservationResponseDto,
   CancelReservationRequestDto,
   ReservationStatus,
 } from "./dto/reservation.dto";
-
-export const BOOKABLE_STATES: EstadoReserva[] = [
-  EstadoReserva.PENDIENTE,
-  EstadoReserva.CONFIRMADA,
-];
-
-// Turnos de inicio (HH:mm). El aforo es diario y lo comparten todos los turnos.
-export const HORARIOS_TURNO = ["09:00", "14:00"];
 
 function statusToEnum(status: EstadoReserva): ReservationStatus {
   if (status === EstadoReserva.CONFIRMADA) return ReservationStatus.CONFIRMED;
@@ -66,6 +60,7 @@ export class AtraccionesService {
     private wishlistRepository: Repository<Wishlist>,
     @InjectRepository(DetalleReserva)
     private detalleReservaRepository: Repository<DetalleReserva>,
+    private readonly integracionBooking: IntegracionBookingService,
   ) {}
 
   // ==========================================
@@ -74,7 +69,9 @@ export class AtraccionesService {
 
   async create(dto: CreateAtraccionDto) {
     const atraccion = this.atraccionRepository.create(dto);
-    return this.atraccionRepository.save(atraccion);
+    const creada = await this.atraccionRepository.save(atraccion);
+    void this.integracionBooking.sincronizarAtraccion(creada.id);
+    return creada;
   }
 
   async findAll(query: PaginationQueryDto) {
@@ -126,12 +123,15 @@ export class AtraccionesService {
     const atraccion = await this.findOne(id);
     Object.assign(atraccion, dto);
     await this.atraccionRepository.save(atraccion);
+    void this.integracionBooking.sincronizarAtraccion(id);
   }
 
   async update(id: string, dto: UpdateAtraccionDto) {
     const atraccion = await this.findOne(id);
     Object.assign(atraccion, dto);
-    return this.atraccionRepository.save(atraccion);
+    const actualizada = await this.atraccionRepository.save(atraccion);
+    void this.integracionBooking.sincronizarAtraccion(id);
+    return actualizada;
   }
 
   async remove(id: string) {
@@ -304,6 +304,7 @@ export class AtraccionesService {
       await queryRunner.manager.save(factura);
 
       await queryRunner.commitTransaction();
+      void this.integracionBooking.notificarStock(id, dto.date);
 
       return {
         reservation_id: reserva.id,
@@ -399,6 +400,13 @@ async getReservationById(id: string, usuarioId: string) {
     if (reserva.estado_reserva !== EstadoReserva.CANCELADA) {
       reserva.estado_reserva = EstadoReserva.CANCELADA;
       await this.reservaRepository.save(reserva);
+      const atraccionId = reserva.detalles?.[0]?.atraccion?.id;
+      if (atraccionId) {
+        void this.integracionBooking.notificarStock(
+          atraccionId,
+          String(reserva.fecha_reserva).slice(0, 10),
+        );
+      }
     }
     return this.toReservationResponse(reserva);
   }
