@@ -22,6 +22,7 @@ import {
 } from "./entities/reserva.entity";
 import { BOOKABLE_STATES, HORARIOS_TURNO } from "./reservas.constants";
 import { InventarioBookingClient } from "./inventario-booking.client";
+import { hoyEcuador, problem } from "./booking.utils";
 import {
   CancelBookingReservaDto,
   CheckinBookingReservaDto,
@@ -31,7 +32,6 @@ import {
   TipoDocumento,
 } from "./dto/booking-reserva.dto";
 
-const ERRORS_BASE = "https://booking.epn.edu.ec/errors";
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -65,20 +65,6 @@ interface ReservaNormalizada {
   metodoPago: string;
   solicitudes: string | null;
   bookingReservationId: string | null;
-}
-
-function problem(
-  status: HttpStatus,
-  code: string,
-  slug: string,
-  title: string,
-  detail: string,
-  extra: Record<string, unknown> = {},
-) {
-  return new HttpException(
-    { type: `${ERRORS_BASE}/${slug}`, title, status, detail, code, ...extra },
-    status,
-  );
 }
 
 function round2(value: number): number {
@@ -129,12 +115,6 @@ function reservaNoEncontrada(id: string) {
     "Reserva no encontrada",
     `No existe una reserva de Booking con identificador '${id}'.`,
   );
-}
-
-function hoyEcuador(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Guayaquil",
-  }).format(new Date());
 }
 
 function horaActualEcuador(): string {

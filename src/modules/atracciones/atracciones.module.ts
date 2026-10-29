@@ -5,6 +5,10 @@ import { AtraccionesController } from "./atracciones.controller";
 import { IntegracionBookingController } from "./integracion-booking.controller";
 import { DisponibilidadController } from "./disponibilidad.controller";
 import { InventarioBookingClient } from "./inventario-booking.client";
+import { CatalogoBookingController } from "./catalogo-booking.controller";
+import { CatalogoBookingService } from "./catalogo-booking.service";
+import { Categoria } from "./entities/categoria.entity";
+import { ContratoPromociones } from "./entities/contrato-promociones.entity";
 import { IntegracionBookingService } from "./integracion-booking.service";
 import { ApiKeyGuard } from "../../common/guards/api-key.guard";
 import { Atraccion } from "./entities/atraccion.entity";
@@ -21,6 +25,8 @@ import { RolesGuard } from "../auth/roles.guard";
   imports: [
     TypeOrmModule.forFeature([
       Atraccion,
+      Categoria,
+      ContratoPromociones,
       Cliente,
       Reserva,
       DetalleReserva,
@@ -30,7 +36,9 @@ import { RolesGuard } from "../auth/roles.guard";
     ]),
     CommonModule,
   ],
+  // CatalogoBookingController va primero: ver comentario en el controlador.
   controllers: [
+    CatalogoBookingController,
     AtraccionesController,
     IntegracionBookingController,
     DisponibilidadController,
@@ -39,6 +47,7 @@ import { RolesGuard } from "../auth/roles.guard";
     AtraccionesService,
     IntegracionBookingService,
     InventarioBookingClient,
+    CatalogoBookingService,
     RolesGuard,
     ApiKeyGuard,
   ],
