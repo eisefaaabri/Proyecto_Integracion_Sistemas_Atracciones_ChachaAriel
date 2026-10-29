@@ -19,11 +19,12 @@ import {
   Pasajeros,
   Reserva,
 } from "./entities/reserva.entity";
-import { BOOKABLE_STATES } from "./atracciones.service";
+import { BOOKABLE_STATES, HORARIOS_TURNO } from "./atracciones.service";
 import {
   CancelBookingReservaDto,
   CheckinBookingReservaDto,
   CreateBookingReservaDto,
+  DisponibilidadQueryDto,
   SolicitanteCancelacion,
   TipoDocumento,
 } from "./dto/booking-reserva.dto";
@@ -39,6 +40,7 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_REGEX = /^ECT-[A-Z2-9]{6}$/;
 const RELACIONES = ["detalles", "detalles.atraccion", "cliente"];
 const PUNTO_ENCUENTRO = "Por confirmar con el operador";
+const UMBRAL_ULTIMOS_CUPOS = 3;
 const MENSAJE_ESTADO: Record<string, string> = {
   PENDING: "Reserva pendiente en Ecuatravel.",
   CONFIRMED: "Reserva confirmada en Ecuatravel.",
@@ -131,6 +133,19 @@ function hoyEcuador(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Guayaquil",
   }).format(new Date());
+}
+
+function horaActualEcuador(): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Guayaquil",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+}
+
+function slotId(fecha: string, hora24: string): string {
+  return `slot-${fecha.replace(/-/g, "")}-${hora24.replace(":", "")}`;
 }
 
 @Injectable()
@@ -304,6 +319,90 @@ export class IntegracionBookingService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  // Aforo diario compartido: cada turno muestra lo que queda del día, que es
+  // exactamente lo que acepta crearReserva.
+  async consultarDisponibilidad(id: string, query: DisponibilidadQueryDto) {
+    const fecha = query.date ?? query.fecha;
+    if (!fecha) {
+      throw problem(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_FAILED",
+        "validacion",
+        "Solicitud inválida",
+        "El parámetro date (YYYY-MM-DD) es obligatorio.",
+        { invalid_params: [{ name: "date", reason: "Es obligatorio." }] },
+      );
+    }
+
+    const atraccion = UUID_REGEX.test(id)
+      ? await this.dataSource.manager.findOne(Atraccion, { where: { id } })
+      : null;
+    if (!atraccion) {
+      throw problem(
+        HttpStatus.NOT_FOUND,
+        "ATTRACTION_NOT_FOUND",
+        "atraccion-no-encontrada",
+        "Atracción no encontrada",
+        `No existe la atracción '${id}'.`,
+      );
+    }
+
+    const hoy = hoyEcuador();
+    const ocupados = await this.boletosOcupados(
+      this.dataSource.manager,
+      atraccion.id,
+      fecha,
+    );
+    const restantesDia =
+      atraccion.estado === "ACTIVA" && fecha >= hoy
+        ? Math.max(atraccion.capacidad_diaria - ocupados, 0)
+        : 0;
+    const precioAdulto = round2(Number(atraccion.precio_base));
+    const precioNino = round2(precioAdulto * FACTOR_PRECIO.ninos);
+    const ahora = horaActualEcuador();
+
+    const turnos = HORARIOS_TURNO.map((hora24) => {
+      const yaInicio = fecha === hoy && hora24 <= ahora;
+      const disponibles = yaInicio ? 0 : restantesDia;
+      const estado =
+        disponibles === 0
+          ? "AGOTADO"
+          : disponibles <= UMBRAL_ULTIMOS_CUPOS
+            ? "ULTIMOS_CUPOS"
+            : "DISPONIBLE";
+      const legible = horaLegible(hora24);
+      return {
+        slot_id: slotId(fecha, hora24),
+        time: legible,
+        time_24h: `${hora24}:00`,
+        total_slots: atraccion.capacidad_diaria,
+        available_slots: disponibles,
+        status: estado,
+        price_adult: precioAdulto,
+        price_child: precioNino,
+        hora: legible,
+        hora_24h: `${hora24}:00`,
+        cupos_totales: atraccion.capacidad_diaria,
+        cupos_disponibles: disponibles,
+        estado,
+        precio_adulto_slot: precioAdulto,
+        precio_nino_slot: precioNino,
+      };
+    });
+
+    // No se suman los turnos: comparten el mismo aforo y se contaría doble.
+    const total = Math.max(...turnos.map((t) => t.available_slots), 0);
+    return {
+      atraccion_id: atraccion.id,
+      date: fecha,
+      fecha,
+      total_available_slots: total,
+      total_cupos_disponibles: total,
+      time_slots: turnos,
+      turnos,
+    };
   }
 
   async obtenerReserva(id: string) {
@@ -522,13 +621,14 @@ export class IntegracionBookingService {
       );
     }
 
-    if (fecha < hoyEcuador()) {
+    const hoy = hoyEcuador();
+    if (fecha < hoy || (fecha === hoy && horaSlot <= horaActualEcuador())) {
       throw problem(
         HttpStatus.UNPROCESSABLE_ENTITY,
         "DATE_IN_PAST",
         "fecha-pasada",
         "Fecha en el pasado",
-        `No se puede reservar para ${fecha}.`,
+        `El turno ${fecha} ${horaSlot} ya comenzó o pasó.`,
       );
     }
 

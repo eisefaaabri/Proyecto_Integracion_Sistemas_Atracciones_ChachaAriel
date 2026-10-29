@@ -3,6 +3,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { AtraccionesService } from "./atracciones.service";
 import { AtraccionesController } from "./atracciones.controller";
 import { IntegracionBookingController } from "./integracion-booking.controller";
+import { DisponibilidadController } from "./disponibilidad.controller";
 import { IntegracionBookingService } from "./integracion-booking.service";
 import { ApiKeyGuard } from "../../common/guards/api-key.guard";
 import { Atraccion } from "./entities/atraccion.entity";
@@ -28,7 +29,11 @@ import { RolesGuard } from "../auth/roles.guard";
     ]),
     CommonModule,
   ],
-  controllers: [AtraccionesController, IntegracionBookingController],
+  controllers: [
+    AtraccionesController,
+    IntegracionBookingController,
+    DisponibilidadController,
+  ],
   providers: [
     AtraccionesService,
     IntegracionBookingService,

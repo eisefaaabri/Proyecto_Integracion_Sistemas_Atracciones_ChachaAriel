@@ -34,6 +34,9 @@ export const BOOKABLE_STATES: EstadoReserva[] = [
   EstadoReserva.CONFIRMADA,
 ];
 
+// Turnos de inicio (HH:mm). El aforo es diario y lo comparten todos los turnos.
+export const HORARIOS_TURNO = ["09:00", "14:00"];
+
 function statusToEnum(status: EstadoReserva): ReservationStatus {
   if (status === EstadoReserva.CONFIRMADA) return ReservationStatus.CONFIRMED;
   if (status === EstadoReserva.CANCELADA) return ReservationStatus.CANCELLED;
@@ -191,7 +194,7 @@ export class AtraccionesService {
     return {
       date,
       available_spots: Math.max(atraccion.capacidad_diaria - booked, 0),
-      times: ["09:00", "14:00"],
+      times: HORARIOS_TURNO,
     };
   }
 

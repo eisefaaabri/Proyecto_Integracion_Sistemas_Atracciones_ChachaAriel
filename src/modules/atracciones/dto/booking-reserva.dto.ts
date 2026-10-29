@@ -287,3 +287,15 @@ export class CheckinBookingReservaDto {
   @MaxLength(100)
   scanner_device_id?: string;
 }
+
+export class DisponibilidadQueryDto {
+  @ApiPropertyOptional({ example: "2026-11-25", format: "date" })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  date?: string;
+
+  @ApiPropertyOptional({ description: "Alias de date", format: "date" })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  fecha?: string;
+}
