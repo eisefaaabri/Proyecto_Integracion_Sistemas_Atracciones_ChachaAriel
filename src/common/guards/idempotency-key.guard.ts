@@ -21,9 +21,9 @@ import { Request } from "express";
  */
 @Injectable()
 export class IdempotencyKeyGuard implements CanActivate {
-  // Expresión regular para validar UUID v4 (formato requerido por los contratos YAML)
-  private static readonly UUID_REGEX =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  // El contrato pide UUID v4, pero el conector de Booking puede enviar claves con
+  // prefijo (ej. "idem-..."): se acepta cualquier token seguro de 8 a 100 caracteres.
+  private static readonly KEY_REGEX = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$/;
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
@@ -37,7 +37,7 @@ export class IdempotencyKeyGuard implements CanActivate {
           title: "Idempotency-Key header is required",
           status: HttpStatus.BAD_REQUEST,
           detail:
-            "All transactional endpoints require an Idempotency-Key header (UUID v4) " +
+            "All transactional endpoints require an Idempotency-Key header (UUID v4 recommended) " +
             "to prevent duplicate operations such as double charges.",
           code: "VALIDATION_FAILED",
         },
@@ -45,13 +45,15 @@ export class IdempotencyKeyGuard implements CanActivate {
       );
     }
 
-    if (!IdempotencyKeyGuard.UUID_REGEX.test(idempotencyKey)) {
+    if (!IdempotencyKeyGuard.KEY_REGEX.test(idempotencyKey)) {
       throw new HttpException(
         {
           type: "https://api.booking-hub.com/errors/invalid-idempotency-key",
           title: "Invalid Idempotency-Key format",
           status: HttpStatus.BAD_REQUEST,
-          detail: `The Idempotency-Key header must be a valid UUID v4. Received: "${idempotencyKey}".`,
+          detail:
+            "The Idempotency-Key header must be a UUID v4 or a token of 8-100 characters " +
+            "(letters, digits, '.', '_', ':' or '-').",
           code: "VALIDATION_FAILED",
         },
         HttpStatus.BAD_REQUEST,

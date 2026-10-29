@@ -48,7 +48,7 @@ export class Reserva {
   estado_reserva: EstadoReserva;
 
   @Index({ unique: true })
-  @Column({ type: "uuid", unique: true, nullable: true })
+  @Column({ type: "varchar", length: 100, unique: true, nullable: true })
   idempotency_key: string;
 
   @Column({ type: "varchar", length: 20, default: CanalReserva.WEB })
@@ -100,7 +100,7 @@ export class Reserva {
   @Column({ type: "varchar", length: 100, nullable: true })
   checkin_dispositivo: string;
 
-  @Column({ type: "uuid", nullable: true })
+  @Column({ type: "varchar", length: 100, nullable: true })
   checkin_idempotency_key: string;
 
   @CreateDateColumn()

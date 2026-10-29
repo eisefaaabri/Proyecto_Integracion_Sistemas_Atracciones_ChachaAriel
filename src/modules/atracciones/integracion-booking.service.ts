@@ -144,6 +144,11 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
   private readonly logger = new Logger(IntegracionBookingService.name);
   private readonly voucherSecret: string;
   private readonly diasSincronizacion: number;
+  // Envíos de stock en curso por "atracción|fecha" (ver notificarStock).
+  private readonly enviosStock = new Map<
+    string,
+    { pendiente: boolean; resultado: Promise<boolean> }
+  >();
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -523,12 +528,43 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
 
   // Empuja a Booking los cupos de cada turno de esa fecha. Nunca lanza: devuelve
   // false si Booking no respondió, para que la sincronización masiva se detenga.
-  async notificarStock(
+  // Un solo envío a la vez por atracción y fecha: si llega otro cambio mientras
+  // tanto, se repite al terminar con el aforo recién leído. El REST de Booking no
+  // lleva timestamp, así que esto evita que un valor viejo pise a uno nuevo.
+  notificarStock(
     atraccionId: string,
     fecha: string,
     correlationId?: string,
   ): Promise<boolean> {
-    if (!this.inventario.habilitado) return true;
+    if (!this.inventario.habilitado) return Promise.resolve(true);
+    const clave = `${atraccionId}|${fecha}`;
+    const enCurso = this.enviosStock.get(clave);
+    if (enCurso) {
+      enCurso.pendiente = true;
+      return enCurso.resultado;
+    }
+    const envio = { pendiente: false, resultado: null as Promise<boolean> };
+    envio.resultado = (async () => {
+      let ok = true;
+      try {
+        do {
+          envio.pendiente = false;
+          ok = await this.enviarStock(atraccionId, fecha, correlationId);
+        } while (envio.pendiente);
+      } finally {
+        this.enviosStock.delete(clave);
+      }
+      return ok;
+    })();
+    this.enviosStock.set(clave, envio);
+    return envio.resultado;
+  }
+
+  private async enviarStock(
+    atraccionId: string,
+    fecha: string,
+    correlationId?: string,
+  ): Promise<boolean> {
     const timestamp = this.inventario.siguienteTimestamp();
     try {
       const disponibilidad = await this.consultarDisponibilidad(atraccionId, {
@@ -536,11 +572,11 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
       });
       const acks = await Promise.all(
         disponibilidad.time_slots.map((turno) =>
-          this.inventario.pushStockUpdate({
+          this.inventario.enviarStock({
             service_id: this.inventario.serviceId,
             item_id: atraccionId,
             date: fecha,
-            time_slot: turno.time,
+            time_slot: turno.time_24h.slice(0, 5),
             available_units: turno.available_slots,
             timestamp,
             slot_id: turno.slot_id,
@@ -548,6 +584,7 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         ),
       );
       this.log("inventario.booking.push", correlationId, {
+        canal: this.inventario.canal,
         attraction_id: atraccionId,
         date: fecha,
         slots: disponibilidad.time_slots.map((t, i) => ({
@@ -561,10 +598,11 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
       this.logger.warn(
         JSON.stringify({
           event: "inventario.booking.push_fallido",
+          canal: this.inventario.canal,
           correlation_id: correlationId,
           attraction_id: atraccionId,
           date: fecha,
-          grpc_code: err?.code,
+          code: err?.code,
           error: err?.message,
         }),
       );
