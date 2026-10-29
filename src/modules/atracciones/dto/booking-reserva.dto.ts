@@ -228,3 +228,62 @@ export class CreateBookingReservaDto {
   @MaxLength(100)
   idempotency_key?: string;
 }
+
+export enum SolicitanteCancelacion {
+  CLIENTE = "CLIENTE",
+  SAGA_ORCHESTRATOR = "SAGA_ORCHESTRATOR",
+  ADMIN = "ADMIN",
+}
+
+export class CancelBookingReservaDto {
+  @ApiPropertyOptional({ example: "SAGA_COMPENSATION_PARTNER_FAILURE" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  reason?: string;
+
+  @ApiPropertyOptional({
+    enum: SolicitanteCancelacion,
+    default: SolicitanteCancelacion.CLIENTE,
+  })
+  @IsOptional()
+  @IsEnum(SolicitanteCancelacion)
+  solicitante?: SolicitanteCancelacion;
+}
+
+export class CheckinBookingReservaDto {
+  @ApiProperty({ example: "1724589633" })
+  @Matches(/^[A-Za-z0-9]{5,20}$/, {
+    message:
+      "documento_identidad debe tener entre 5 y 20 caracteres alfanuméricos",
+  })
+  documento_identidad: string;
+
+  @ApiPropertyOptional({
+    description: "Código de reserva (ECT-XXXXXX) o voucher_qr_payload",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  codigo_voucher_qr?: string;
+
+  @ApiPropertyOptional({ example: "GUIA-CARLOS-01" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  guia_codigo?: string;
+
+  @ApiPropertyOptional({
+    description: "Nombre del guía (payload de la guía de socios)",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  guia_asignado?: string;
+
+  @ApiPropertyOptional({ example: "SCANNER-TERMINAL-04" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  scanner_device_id?: string;
+}

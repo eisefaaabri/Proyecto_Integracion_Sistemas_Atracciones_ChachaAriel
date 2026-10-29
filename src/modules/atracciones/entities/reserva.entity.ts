@@ -81,6 +81,28 @@ export class Reserva {
   @Column({ type: "jsonb", nullable: true })
   pasajeros: Pasajeros;
 
+  @Column({ type: "timestamptz", nullable: true })
+  cancelada_at: Date;
+
+  @Column({ type: "varchar", length: 200, nullable: true })
+  cancelacion_motivo: string;
+
+  @Column({ type: "varchar", length: 20, nullable: true })
+  cancelacion_solicitante: string;
+
+  // Con checkin_at la reserva sigue CONFIRMADA (ocupa cupo) pero se expone como CHECKED_IN.
+  @Column({ type: "timestamptz", nullable: true })
+  checkin_at: Date;
+
+  @Column({ type: "varchar", length: 150, nullable: true })
+  checkin_guia: string;
+
+  @Column({ type: "varchar", length: 100, nullable: true })
+  checkin_dispositivo: string;
+
+  @Column({ type: "uuid", nullable: true })
+  checkin_idempotency_key: string;
+
   @CreateDateColumn()
   created_at: Date;
 

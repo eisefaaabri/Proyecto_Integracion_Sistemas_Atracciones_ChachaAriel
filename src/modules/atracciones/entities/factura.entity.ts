@@ -15,6 +15,7 @@ import { Cliente } from "./cliente.entity";
 export enum EstadoPago {
   PENDIENTE = "PENDIENTE",
   PAGADO = "PAGADO",
+  REEMBOLSADO = "REEMBOLSADO",
 }
 
 @Entity("facturas")

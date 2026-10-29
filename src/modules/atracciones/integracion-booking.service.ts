@@ -8,7 +8,7 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource, EntityManager } from "typeorm";
-import { createHmac, randomInt } from "crypto";
+import { createHash, createHmac, randomInt, timingSafeEqual } from "crypto";
 import { Atraccion } from "./entities/atraccion.entity";
 import { Cliente } from "./entities/cliente.entity";
 import { DetalleReserva } from "./entities/detalle-reserva.entity";
@@ -21,7 +21,10 @@ import {
 } from "./entities/reserva.entity";
 import { BOOKABLE_STATES } from "./atracciones.service";
 import {
+  CancelBookingReservaDto,
+  CheckinBookingReservaDto,
   CreateBookingReservaDto,
+  SolicitanteCancelacion,
   TipoDocumento,
 } from "./dto/booking-reserva.dto";
 
@@ -33,6 +36,15 @@ const UUID_REGEX =
 const FACTOR_PRECIO = { adultos: 1, ninos: 0.5, seniors: 0.7, infantes: 0 };
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_REGEX = /^ECT-[A-Z2-9]{6}$/;
+const RELACIONES = ["detalles", "detalles.atraccion", "cliente"];
+const PUNTO_ENCUENTRO = "Por confirmar con el operador";
+const MENSAJE_ESTADO: Record<string, string> = {
+  PENDING: "Reserva pendiente en Ecuatravel.",
+  CONFIRMED: "Reserva confirmada en Ecuatravel.",
+  CHECKED_IN: "Check-in registrado en Ecuatravel.",
+  CANCELLED: "Reserva cancelada; cupos reintegrados y reembolso emitido.",
+};
 
 interface ReservaNormalizada {
   atraccionId: string;
@@ -90,6 +102,29 @@ function toHora24(raw: string): string | null {
 function horaLegible(hora24: string): string {
   const [h, min] = hora24.split(":").map(Number);
   return `${h % 12 || 12}:${String(min).padStart(2, "0")} ${h < 12 ? "a.m." : "p.m."}`;
+}
+
+function igualSeguro(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+// No se guarda el tipo de documento del turista; se deduce del formato.
+function inferirTipoDocumento(documento: string): TipoDocumento {
+  if (/^\d{10}$/.test(documento)) return TipoDocumento.CEDULA;
+  if (/^\d{13}$/.test(documento)) return TipoDocumento.RUC;
+  return TipoDocumento.PASAPORTE;
+}
+
+function reservaNoEncontrada(id: string) {
+  return problem(
+    HttpStatus.NOT_FOUND,
+    "RESERVATION_NOT_FOUND",
+    "reserva-no-encontrada",
+    "Reserva no encontrada",
+    `No existe una reserva de Booking con identificador '${id}'.`,
+  );
 }
 
 function hoyEcuador(): string {
@@ -271,6 +306,139 @@ export class IntegracionBookingService {
     }
   }
 
+  async obtenerReserva(id: string) {
+    const reserva = await this.buscarReserva(this.dataSource.manager, id);
+    if (!reserva) throw reservaNoEncontrada(id);
+    return this.toResponse(reserva);
+  }
+
+  // Compensación de la Saga: repetir la cancelación devuelve 200 con el mismo estado,
+  // por eso no depende de Idempotency-Key.
+  async cancelarReserva(
+    id: string,
+    dto: CancelBookingReservaDto,
+    correlationId: string,
+  ) {
+    return this.enTransaccion(
+      "reserva.booking.cancelacion",
+      correlationId,
+      async (manager) => {
+        const reserva = await this.buscarReserva(manager, id, true);
+        if (!reserva) throw reservaNoEncontrada(id);
+
+        if (reserva.estado_reserva === EstadoReserva.CANCELADA) {
+          return this.toResponse(reserva);
+        }
+        if (reserva.checkin_at) {
+          throw problem(
+            HttpStatus.CONFLICT,
+            "ALREADY_CHECKED_IN",
+            "reserva-con-checkin",
+            "La reserva ya registró check-in",
+            `La reserva ${reserva.codigo_reserva} ya fue utilizada y no puede cancelarse.`,
+          );
+        }
+
+        reserva.estado_reserva = EstadoReserva.CANCELADA;
+        reserva.cancelada_at = new Date();
+        reserva.cancelacion_motivo = dto.reason?.trim() || null;
+        reserva.cancelacion_solicitante =
+          dto.solicitante ?? SolicitanteCancelacion.CLIENTE;
+        await manager.save(reserva);
+        await manager.update(
+          Factura,
+          { reserva: { id: reserva.id } },
+          { estado_pago: EstadoPago.REEMBOLSADO },
+        );
+
+        this.log("reserva.booking.cancelada", correlationId, {
+          reservation_id: reserva.id,
+          reservation_code: reserva.codigo_reserva,
+          solicitante: reserva.cancelacion_solicitante,
+          reason: reserva.cancelacion_motivo,
+          tickets_liberados: reserva.detalles?.[0]?.cantidad_boletos ?? 0,
+        });
+        return this.toResponse(reserva);
+      },
+    );
+  }
+
+  async registrarCheckin(
+    id: string,
+    dto: CheckinBookingReservaDto,
+    idempotencyKey: string,
+    correlationId: string,
+  ) {
+    return this.enTransaccion(
+      "reserva.booking.checkin",
+      correlationId,
+      async (manager) => {
+        const reserva = await this.buscarReserva(manager, id, true);
+        if (!reserva) throw reservaNoEncontrada(id);
+
+        if (reserva.estado_reserva !== EstadoReserva.CONFIRMADA) {
+          throw problem(
+            HttpStatus.CONFLICT,
+            "RESERVATION_NOT_ACTIVE",
+            "reserva-no-activa",
+            "La reserva no admite check-in",
+            `La reserva ${reserva.codigo_reserva} está ${this.estadoContrato(reserva)}.`,
+          );
+        }
+        if (dto.documento_identidad.toUpperCase() !== reserva.cliente?.dni) {
+          throw problem(
+            HttpStatus.FORBIDDEN,
+            "IDENTITY_MISMATCH",
+            "identidad-no-coincide",
+            "Documento de identidad no coincide",
+            "El documento presentado no corresponde al titular de la reserva.",
+          );
+        }
+        if (
+          dto.codigo_voucher_qr &&
+          !this.voucherValido(reserva, dto.codigo_voucher_qr)
+        ) {
+          throw problem(
+            HttpStatus.FORBIDDEN,
+            "VOUCHER_INVALID",
+            "voucher-invalido",
+            "Voucher inválido",
+            "El código QR presentado no corresponde a esta reserva.",
+          );
+        }
+
+        if (reserva.checkin_at) {
+          // Reintento del mismo escaneo: se devuelve el pase ya emitido.
+          if (reserva.checkin_idempotency_key === idempotencyKey) {
+            return this.toCheckinResponse(reserva);
+          }
+          throw problem(
+            HttpStatus.CONFLICT,
+            "ALREADY_CHECKED_IN",
+            "reserva-con-checkin",
+            "La reserva ya registró check-in",
+            `La reserva ${reserva.codigo_reserva} registró check-in el ${reserva.checkin_at.toISOString()}.`,
+          );
+        }
+
+        reserva.checkin_at = new Date();
+        reserva.checkin_guia =
+          dto.guia_asignado?.trim() || dto.guia_codigo?.trim() || null;
+        reserva.checkin_dispositivo = dto.scanner_device_id?.trim() || null;
+        reserva.checkin_idempotency_key = idempotencyKey;
+        await manager.save(reserva);
+
+        this.log("reserva.booking.checkin", correlationId, {
+          reservation_id: reserva.id,
+          reservation_code: reserva.codigo_reserva,
+          guia: reserva.checkin_guia,
+          dispositivo: reserva.checkin_dispositivo,
+        });
+        return this.toCheckinResponse(reserva);
+      },
+    );
+  }
+
   private normalizar(dto: CreateBookingReservaDto): ReservaNormalizada {
     const invalid: { name: string; reason: string }[] = [];
     const c = dto.customer;
@@ -386,8 +554,62 @@ export class IntegracionBookingService {
   private buscarPorIdempotencia(key: string): Promise<Reserva | null> {
     return this.dataSource.getRepository(Reserva).findOne({
       where: { idempotency_key: key },
-      relations: ["detalles", "detalles.atraccion"],
+      relations: RELACIONES,
     });
+  }
+
+  // Acepta UUID, código PNR (ECT-XXXXXX) o el booking_reservation_id de Booking.
+  // Solo expone reservas del canal BOOKING: la API key no da acceso a las ventas web.
+  private async buscarReserva(
+    manager: EntityManager,
+    id: string,
+    bloquear = false,
+  ): Promise<Reserva | null> {
+    const valor = id.trim();
+    const where = UUID_REGEX.test(valor)
+      ? { id: valor }
+      : CODE_REGEX.test(valor.toUpperCase())
+        ? { codigo_reserva: valor.toUpperCase() }
+        : { booking_reservation_id: valor };
+
+    // FOR UPDATE no admite LEFT JOIN en PostgreSQL: primero se bloquea la fila.
+    const base = await manager.findOne(Reserva, {
+      where: { ...where, canal: CanalReserva.BOOKING },
+      ...(bloquear && { lock: { mode: "pessimistic_write" as const } }),
+    });
+    if (!base) return null;
+    return manager.findOne(Reserva, {
+      where: { id: base.id },
+      relations: RELACIONES,
+    });
+  }
+
+  private async enTransaccion<T>(
+    evento: string,
+    correlationId: string,
+    fn: (manager: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.dataSource.transaction(fn);
+    } catch (err) {
+      if (err instanceof HttpException) {
+        this.log(`${evento}.rechazada`, correlationId, {
+          status: err.getStatus(),
+          code: (err.getResponse() as any)?.code,
+        });
+        throw err;
+      }
+      this.logger.error(
+        JSON.stringify({
+          event: `${evento}.error`,
+          correlation_id: correlationId,
+          error: err?.message,
+        }),
+      );
+      throw new InternalServerErrorException(
+        "No se pudo procesar la solicitud",
+      );
+    }
   }
 
   private async boletosOcupados(
@@ -435,19 +657,67 @@ export class IntegracionBookingService {
     return code;
   }
 
+  private firma(ambito: string, payload: string): string {
+    return createHmac("sha256", this.voucherSecret)
+      .update(`${ambito}.${payload}`)
+      .digest("base64url");
+  }
+
+  private sellar(ambito: string, data: object): string {
+    const payload = Buffer.from(JSON.stringify(data)).toString("base64url");
+    return `${payload}.${this.firma(ambito, payload)}`;
+  }
+
   private firmarVoucher(reserva: Reserva): string {
-    const payload = Buffer.from(
-      JSON.stringify({
+    return this.sellar("voucher", {
+      rid: reserva.id,
+      code: reserva.codigo_reserva,
+      date: String(reserva.fecha_reserva).slice(0, 10),
+      time: reserva.hora_turno,
+    });
+  }
+
+  private voucherValido(reserva: Reserva, codigo: string): boolean {
+    const valor = codigo.trim();
+    if (valor.toUpperCase() === reserva.codigo_reserva) return true;
+    const [payload, firma] = valor.split(".");
+    if (!payload || !firma) return false;
+    if (!igualSeguro(firma, this.firma("voucher", payload))) return false;
+    try {
+      const data = JSON.parse(Buffer.from(payload, "base64url").toString());
+      return data?.rid === reserva.id;
+    } catch {
+      return false;
+    }
+  }
+
+  private estadoContrato(reserva: Reserva): string {
+    if (reserva.estado_reserva === EstadoReserva.CANCELADA) return "CANCELLED";
+    if (reserva.estado_reserva === EstadoReserva.CONFIRMADA) {
+      return reserva.checkin_at ? "CHECKED_IN" : "CONFIRMED";
+    }
+    return "PENDING";
+  }
+
+  private toCheckinResponse(reserva: Reserva) {
+    const horaCheckin = reserva.checkin_at.toISOString();
+    return {
+      success: true,
+      reserva_id: reserva.id,
+      reservation_code: reserva.codigo_reserva,
+      estado: "CHECKED_IN",
+      status: "CHECKED_IN",
+      titular_nombre: reserva.cliente?.nombre_completo,
+      titular_documento: reserva.cliente?.dni,
+      guia_asignado: reserva.checkin_guia ?? "Por asignar",
+      punto_encuentro: PUNTO_ENCUENTRO,
+      hora_checkin: horaCheckin,
+      pase_abordar_qr: this.sellar("pase", {
         rid: reserva.id,
         code: reserva.codigo_reserva,
-        date: reserva.fecha_reserva,
-        time: reserva.hora_turno,
+        checkin: horaCheckin,
       }),
-    ).toString("base64url");
-    const firma = createHmac("sha256", this.voucherSecret)
-      .update(`voucher.${payload}`)
-      .digest("base64url");
-    return `${payload}.${firma}`;
+    };
   }
 
   private toResponse(reserva: Reserva) {
@@ -456,16 +726,13 @@ export class IntegracionBookingService {
     const fecha = String(reserva.fecha_reserva).slice(0, 10);
     const hora = reserva.hora_turno ? horaLegible(reserva.hora_turno) : null;
     const total = Number(detalle?.subtotal ?? 0);
-    const status =
-      reserva.estado_reserva === EstadoReserva.CANCELADA
-        ? "CANCELLED"
-        : reserva.estado_reserva === EstadoReserva.CONFIRMADA
-          ? "CONFIRMED"
-          : "PENDING";
+    const status = this.estadoContrato(reserva);
+    const self = `/api/v3/atracciones/reservas/${reserva.id}`;
+    const cliente = reserva.cliente;
 
     return {
       success: true,
-      message: "Reserva confirmada en Ecuatravel.",
+      message: MENSAJE_ESTADO[status],
       external_order_id: `ORD-${reserva.codigo_reserva}`,
       reservation_id: reserva.id,
       reservation_code: reserva.codigo_reserva,
@@ -494,9 +761,34 @@ export class IntegracionBookingService {
       currency: "USD",
       moneda: "USD",
       booking_reservation_id: reserva.booking_reservation_id,
-      guia_asignado: "Por asignar",
-      punto_encuentro: "Por confirmar con el operador",
+      customer: cliente && {
+        full_name: cliente.nombre_completo,
+        nombre_completo: cliente.nombre_completo,
+        email: reserva.contacto_email,
+        correo: reserva.contacto_email,
+        phone: cliente.telefono,
+        telefono: cliente.telefono,
+        document_type: inferirTipoDocumento(cliente.dni),
+        document_id: cliente.dni,
+      },
+      guia_asignado: reserva.checkin_guia ?? "Por asignar",
+      punto_encuentro: PUNTO_ENCUENTRO,
       voucher_qr_payload: this.firmarVoucher(reserva),
+      ...(reserva.checkin_at && {
+        hora_checkin: reserva.checkin_at.toISOString(),
+      }),
+      ...(status === "CANCELLED" && {
+        reembolso_id: `REF-${reserva.codigo_reserva}`,
+        monto_reembolsado: total,
+        cancelled_at: reserva.cancelada_at?.toISOString() ?? null,
+      }),
+      _links: {
+        self,
+        ...(status === "CONFIRMED" && {
+          checkin: `${self}/checkin`,
+          cancel: `${self}/cancel`,
+        }),
+      },
     };
   }
 
