@@ -4,52 +4,51 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  OnApplicationBootstrap,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource, EntityManager } from "typeorm";
-import { createHash, createHmac, randomInt, timingSafeEqual } from "crypto";
-import { Atraccion } from "./entities/atraccion.entity";
-import { Cliente } from "./entities/cliente.entity";
-import { DetalleReserva } from "./entities/detalle-reserva.entity";
-import { Factura, EstadoPago } from "./entities/factura.entity";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
+import { EstadoAtraccion } from "../catalog/catalog.entities";
+import { CatalogService } from "../catalog/catalog.service";
+import { InventoryService } from "../inventory/inventory.service";
+import { OrderService, hashSolicitud } from "../order/order.service";
+import { CanalOrden } from "../order/order.entities";
+import { BookingService } from "../booking/booking.service";
+import { CodigoEstadoReserva, Reserva } from "../booking/booking.entities";
+import { PaymentService } from "../payment/payment.service";
+import { CONSUMIDOR_FINAL } from "../billing-profile/billing-profile.service";
+import { DisponibilidadAppService } from "./disponibilidad-app.service";
 import {
-  CanalReserva,
-  EstadoReserva,
-  Pasajeros,
-  Reserva,
-} from "./entities/reserva.entity";
-import { HORARIOS_TURNO } from "./reservas.constants";
-import { contarBoletosOcupados } from "./aforo.util";
-import { OutboxService } from "./outbox.service";
-import { TipoEventoOutbox } from "./entities/outbox-evento.entity";
-import { InventarioBookingClient } from "./inventario-booking.client";
-import { hoyEcuador, problem } from "./booking.utils";
+  ReservaUsadaError,
+  ReservasAppService,
+  SinCupoError,
+  VistaReserva,
+} from "./reservas-app.service";
+import {
+  UUID_REGEX,
+  horaActualEcuador,
+  horaLegible,
+  hoyEcuador,
+  problem,
+  toHora24,
+} from "./booking.utils";
 import {
   CancelBookingReservaDto,
   CheckinBookingReservaDto,
   CreateBookingReservaDto,
-  DisponibilidadQueryDto,
   SolicitanteCancelacion,
   TipoDocumento,
 } from "./dto/booking-reserva.dto";
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Descuentos por tipo de pasajero definidos en CreateReservaRequestV3.
-const FACTOR_PRECIO = { adultos: 1, ninos: 0.5, seniors: 0.7, infantes: 0 };
-
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_REGEX = /^ECT-[A-Z2-9]{6}$/;
-const RELACIONES = ["detalles", "detalles.atraccion", "cliente"];
 const PUNTO_ENCUENTRO = "Por confirmar con el operador";
-const UMBRAL_ULTIMOS_CUPOS = 3;
+const SUJETO_BOOKING = "canal:BOOKING";
 const MENSAJE_ESTADO: Record<string, string> = {
   PENDING: "Reserva pendiente en Ecuatravel.",
   CONFIRMED: "Reserva confirmada en Ecuatravel.",
   CHECKED_IN: "Check-in registrado en Ecuatravel.",
+  COMPLETED: "Reserva completada en Ecuatravel.",
   CANCELLED: "Reserva cancelada; cupos reintegrados y reembolso emitido.",
 };
 
@@ -57,44 +56,21 @@ interface ReservaNormalizada {
   atraccionId: string;
   fecha: string;
   hora: string;
-  slotId: string;
-  pasajeros: Pasajeros;
+  pasajeros: {
+    adultos: number;
+    ninos: number;
+    seniors: number;
+    infantes: number;
+  };
   totalBoletos: number;
   nombre: string;
   email: string;
   telefono: string | null;
   documento: string;
   tipoDocumento: TipoDocumento;
-  metodoPago: string;
+  metodoPago: string | null;
   solicitudes: string | null;
   bookingReservationId: string | null;
-}
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-// "10:30 a.m.", "2:00 PM", "10:30", "10:30:00" -> "10:30" (24 h). null si no es válida.
-function toHora24(raw: string): string | null {
-  const m = raw
-    .trim()
-    .toLowerCase()
-    .match(/^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?\s*(a\.?\s?m\.?|p\.?\s?m\.?)?$/);
-  if (!m) return null;
-  let h = Number(m[1]);
-  const meridiano = m[3]?.[0];
-  if (meridiano) {
-    if (h < 1 || h > 12) return null;
-    if (meridiano === "p" && h < 12) h += 12;
-    if (meridiano === "a" && h === 12) h = 0;
-  }
-  if (h > 23) return null;
-  return `${String(h).padStart(2, "0")}:${m[2]}`;
-}
-
-function horaLegible(hora24: string): string {
-  const [h, min] = hora24.split(":").map(Number);
-  return `${h % 12 || 12}:${String(min).padStart(2, "0")} ${h < 12 ? "a.m." : "p.m."}`;
 }
 
 function igualSeguro(a: string, b: string): boolean {
@@ -104,9 +80,9 @@ function igualSeguro(a: string, b: string): boolean {
 }
 
 // No se guarda el tipo de documento del turista; se deduce del formato.
-function inferirTipoDocumento(documento: string): TipoDocumento {
-  if (/^\d{10}$/.test(documento)) return TipoDocumento.CEDULA;
-  if (/^\d{13}$/.test(documento)) return TipoDocumento.RUC;
+function inferirTipoDocumento(documento: string | null): TipoDocumento {
+  if (documento && /^\d{10}$/.test(documento)) return TipoDocumento.CEDULA;
+  if (documento && /^\d{13}$/.test(documento)) return TipoDocumento.RUC;
   return TipoDocumento.PASAPORTE;
 }
 
@@ -120,52 +96,43 @@ function reservaNoEncontrada(id: string) {
   );
 }
 
-function horaActualEcuador(): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "America/Guayaquil",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date());
-}
-
-function sumarDias(fecha: string, dias: number): string {
-  const d = new Date(`${fecha}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + dias);
-  return d.toISOString().slice(0, 10);
-}
-
-function slotId(fecha: string, hora24: string): string {
-  return `slot-${fecha.replace(/-/g, "")}-${hora24.replace(":", "")}`;
+function estadoContrato(estado: CodigoEstadoReserva): string {
+  switch (estado) {
+    case CodigoEstadoReserva.CANCELADA:
+      return "CANCELLED";
+    case CodigoEstadoReserva.CHECKED_IN:
+      return "CHECKED_IN";
+    case CodigoEstadoReserva.COMPLETADA:
+      return "COMPLETED";
+    case CodigoEstadoReserva.CONFIRMADA:
+      return "CONFIRMED";
+    default:
+      return "PENDING";
+  }
 }
 
 @Injectable()
-export class IntegracionBookingService implements OnApplicationBootstrap {
+export class IntegracionBookingService {
   private readonly logger = new Logger(IntegracionBookingService.name);
   private readonly voucherSecret: string;
-  private readonly diasSincronizacion: number;
-  // Envíos de stock en curso por "atracción|fecha" (ver notificarStock).
-  private readonly enviosStock = new Map<
-    string,
-    { pendiente: boolean; resultado: Promise<boolean> }
-  >();
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly inventario: InventarioBookingClient,
-    private readonly outbox: OutboxService,
+    private readonly catalog: CatalogService,
+    private readonly inventory: InventoryService,
+    private readonly orders: OrderService,
+    private readonly bookings: BookingService,
+    private readonly payments: PaymentService,
+    private readonly reservas: ReservasAppService,
+    private readonly disponibilidad: DisponibilidadAppService,
     config: ConfigService,
   ) {
-    this.diasSincronizacion = Number(
-      config.get<string>("BOOKING_GRPC_SYNC_DIAS", "7"),
-    );
     const secret =
       config.get<string>("VOUCHER_SECRET") ?? config.get<string>("JWT_SECRET");
-    if (!secret) {
+    if (!secret)
       throw new Error(
         "Defina VOUCHER_SECRET o JWT_SECRET para firmar vouchers.",
       );
-    }
     this.voucherSecret = secret;
   }
 
@@ -175,143 +142,132 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
     correlationId: string,
   ) {
     const datos = this.normalizar(dto);
+    const hash = hashSolicitud(dto);
 
-    const previa = await this.buscarPorIdempotencia(idempotencyKey);
-    if (previa) {
+    const previa = await this.orders.claveExistente(
+      idempotencyKey,
+      SUJETO_BOOKING,
+    );
+    if (previa?.idem_recurso_id) {
       this.log("reserva.booking.replay", correlationId, {
-        reservation_id: previa.id,
+        reservation_id: previa.idem_recurso_id,
       });
-      return this.toResponse(previa);
+      return this.respuestaDe(previa.idem_recurso_id);
     }
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
+    let atrUuid: string | null = null;
     try {
-      const manager = queryRunner.manager;
-
-      // El bloqueo de la fila serializa reservas concurrentes de la misma atracción.
-      const atraccion = UUID_REGEX.test(datos.atraccionId)
-        ? await manager.findOne(Atraccion, {
-            where: { id: datos.atraccionId },
-            lock: { mode: "pessimistic_write" },
-          })
-        : null;
-      if (!atraccion) {
-        throw problem(
-          HttpStatus.NOT_FOUND,
-          "ATTRACTION_NOT_FOUND",
-          "atraccion-no-encontrada",
-          "Atracción no encontrada",
-          `No existe la atracción '${datos.atraccionId}'.`,
+      const respuesta = await this.dataSource.transaction(async (manager) => {
+        // La clave se toma primero: un reintento concurrente espera y luego devuelve lo mismo.
+        const tomada = await this.orders.tomarClave(
+          idempotencyKey,
+          SUJETO_BOOKING,
+          "POST /reservas",
+          hash,
+          manager,
         );
-      }
+        if (tomada?.idem_recurso_id) return { replay: tomada.idem_recurso_id };
 
-      const ocupados = await contarBoletosOcupados(
-        manager,
-        atraccion.id,
+        const atrBase = UUID_REGEX.test(datos.atraccionId)
+          ? await this.catalog.findByUuid(datos.atraccionId, manager)
+          : null;
+        // El bloqueo de la fila serializa reservas concurrentes de la misma atracción.
+        const atraccion =
+          atrBase && (await this.catalog.bloquear(atrBase.atr_id, manager))
+            ? atrBase
+            : null;
+        if (!atraccion) {
+          throw problem(
+            HttpStatus.NOT_FOUND,
+            "ATTRACTION_NOT_FOUND",
+            "atraccion-no-encontrada",
+            "Atracción no encontrada",
+            `No existe la atracción '${datos.atraccionId}'.`,
+          );
+        }
+        atrUuid = atraccion.atr_uuid;
+        const turno = (
+          await this.inventory.cuposDelDia(
+            atraccion.atr_id,
+            datos.fecha,
+            manager,
+          )
+        ).find((t) => t.hora === datos.hora);
+        if (!turno) {
+          throw problem(
+            HttpStatus.BAD_REQUEST,
+            "INVALID_SLOT",
+            "slot-invalido",
+            "Turno horario inválido",
+            `La atracción ${atraccion.atr_nombre} no opera a las ${horaLegible(datos.hora)}.`,
+          );
+        }
+        if (atraccion.atr_estado !== EstadoAtraccion.PUBLICADA) {
+          throw this.sinCupo(atraccion.atr_nombre, datos, 0);
+        }
+
+        const vista = await this.reservas
+          .crear(
+            {
+              atraccion,
+              fecha: datos.fecha,
+              horId: turno.horId,
+              pasajeros: datos.pasajeros,
+              canal: CanalOrden.BOOKING,
+              usuId: null,
+              titular: { nombre: datos.nombre, documento: datos.documento },
+              contacto: { correo: datos.email, telefono: datos.telefono },
+              comprador: {
+                tipoIdentificacion: datos.tipoDocumento,
+                identificacion: datos.documento,
+                razonSocial: datos.nombre,
+                correo: datos.email,
+                telefono: datos.telefono,
+              },
+              // Booking ya cobró al turista: la orden nace pagada.
+              pago: {
+                metodo: this.payments.codigoMetodo(datos.metodoPago),
+                referencia: datos.bookingReservationId,
+              },
+              referenciaExterna: datos.bookingReservationId,
+              observaciones: datos.solicitudes,
+            },
+            manager,
+          )
+          .catch((err) => {
+            if (err instanceof SinCupoError)
+              throw this.sinCupo(atraccion.atr_nombre, datos, err.disponibles);
+            throw err;
+          });
+
+        const cuerpo = this.toResponse(vista);
+        await this.orders.completarClave(
+          idempotencyKey,
+          SUJETO_BOOKING,
+          vista.reserva.res_uuid,
+          cuerpo,
+          manager,
+        );
+        this.log("reserva.booking.confirmada", correlationId, {
+          reservation_id: vista.reserva.res_uuid,
+          reservation_code: vista.reserva.res_codigo,
+          attraction_id: atraccion.atr_uuid,
+          date: datos.fecha,
+          time: datos.hora,
+          tickets: datos.totalBoletos,
+          booking_reservation_id: datos.bookingReservationId,
+        });
+        return { cuerpo };
+      });
+
+      if ("replay" in respuesta) return this.respuestaDe(respuesta.replay);
+      void this.disponibilidad.notificarStock(
+        atrUuid,
         datos.fecha,
+        correlationId,
       );
-      const restantes =
-        atraccion.estado === "ACTIVA"
-          ? Math.max(atraccion.capacidad_diaria - ocupados, 0)
-          : 0;
-      if (datos.totalBoletos > restantes) {
-        throw problem(
-          HttpStatus.CONFLICT,
-          "OUT_OF_STOCK",
-          "sin-cupos",
-          "Cupos Agotados para el Turno Solicitado",
-          `La atracción ${atraccion.nombre} no dispone de ${datos.totalBoletos} cupos para el ` +
-            `${datos.fecha} (${horaLegible(datos.hora)}). Cupos restantes: ${restantes}.`,
-        );
-      }
-
-      const cliente = await this.obtenerCliente(manager, datos);
-
-      const precioBase = Number(atraccion.precio_base);
-      const total = round2(
-        (Object.keys(FACTOR_PRECIO) as (keyof Pasajeros)[]).reduce(
-          (acc, tipo) =>
-            acc + precioBase * FACTOR_PRECIO[tipo] * datos.pasajeros[tipo],
-          0,
-        ),
-      );
-
-      const reserva = manager.create(Reserva, {
-        fecha_reserva: datos.fecha,
-        estado_reserva: EstadoReserva.CONFIRMADA,
-        idempotency_key: idempotencyKey,
-        canal: CanalReserva.BOOKING,
-        codigo_reserva: this.generarCodigo(),
-        hora_turno: datos.hora,
-        slot_id: datos.slotId,
-        booking_reservation_id: datos.bookingReservationId,
-        correlation_id: correlationId,
-        contacto_email: datos.email,
-        solicitudes_especiales: datos.solicitudes,
-        pasajeros: datos.pasajeros,
-        cliente,
-      });
-      await manager.save(reserva);
-
-      const detalle = manager.create(DetalleReserva, {
-        reserva,
-        atraccion,
-        cantidad_boletos: datos.totalBoletos,
-        precio_unitario_historico: precioBase,
-        subtotal: total,
-      });
-      await manager.save(detalle);
-
-      // Booking ya cobró al turista: la factura nace pagada.
-      const factura = manager.create(Factura, {
-        numero_factura: `FAC-${reserva.codigo_reserva}`,
-        fecha_emision: hoyEcuador(),
-        ruc_cliente: datos.documento,
-        estado_pago: EstadoPago.PAGADO,
-        total_pagado: total,
-        metodo_pago: datos.metodoPago,
-        transaction_id: datos.bookingReservationId,
-        reserva,
-        cliente,
-      });
-      await manager.save(factura);
-
-      await this.outbox.registrarCambioReserva(
-        manager,
-        TipoEventoOutbox.RESERVA_CONFIRMADA,
-        {
-          reservaId: reserva.id,
-          codigo: reserva.codigo_reserva,
-          canal: CanalReserva.BOOKING,
-          atraccionId: atraccion.id,
-          fecha: datos.fecha,
-          hora: datos.hora,
-          boletos: datos.totalBoletos,
-          total,
-          extra: { booking_reservation_id: datos.bookingReservationId },
-        },
-      );
-
-      await queryRunner.commitTransaction();
-      void this.notificarStock(atraccion.id, datos.fecha, correlationId);
-
-      reserva.detalles = [{ ...detalle, atraccion }];
-      this.log("reserva.booking.confirmada", correlationId, {
-        reservation_id: reserva.id,
-        reservation_code: reserva.codigo_reserva,
-        attraction_id: atraccion.id,
-        date: datos.fecha,
-        time: datos.hora,
-        tickets: datos.totalBoletos,
-        booking_reservation_id: datos.bookingReservationId,
-      });
-      return this.toResponse(reserva);
+      return respuesta.cuerpo;
     } catch (err) {
-      await queryRunner.rollbackTransaction();
-
       if (err instanceof HttpException) {
         this.log("reserva.booking.rechazada", correlationId, {
           status: err.getStatus(),
@@ -319,14 +275,15 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         });
         throw err;
       }
-
-      // Dos reintentos simultáneos con la misma clave: gana uno y el otro
-      // devuelve la misma respuesta.
+      // Dos reintentos simultáneos con la misma clave: gana uno y el otro devuelve lo mismo.
       if (String(err?.code) === "23505") {
-        const ganadora = await this.buscarPorIdempotencia(idempotencyKey);
-        if (ganadora) return this.toResponse(ganadora);
+        const ganadora = await this.orders.claveExistente(
+          idempotencyKey,
+          SUJETO_BOOKING,
+        );
+        if (ganadora?.idem_recurso_id)
+          return this.respuestaDe(ganadora.idem_recurso_id);
       }
-
       this.logger.error(
         JSON.stringify({
           event: "reserva.booking.error",
@@ -335,99 +292,13 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         }),
       );
       throw new InternalServerErrorException("No se pudo registrar la reserva");
-    } finally {
-      await queryRunner.release();
     }
-  }
-
-  // Aforo diario compartido: cada turno muestra lo que queda del día, que es
-  // exactamente lo que acepta crearReserva.
-  async consultarDisponibilidad(id: string, query: DisponibilidadQueryDto) {
-    const fecha = query.date ?? query.fecha;
-    if (!fecha) {
-      throw problem(
-        HttpStatus.BAD_REQUEST,
-        "VALIDATION_FAILED",
-        "validacion",
-        "Solicitud inválida",
-        "El parámetro date (YYYY-MM-DD) es obligatorio.",
-        { invalid_params: [{ name: "date", reason: "Es obligatorio." }] },
-      );
-    }
-
-    const atraccion = UUID_REGEX.test(id)
-      ? await this.dataSource.manager.findOne(Atraccion, { where: { id } })
-      : null;
-    if (!atraccion) {
-      throw problem(
-        HttpStatus.NOT_FOUND,
-        "ATTRACTION_NOT_FOUND",
-        "atraccion-no-encontrada",
-        "Atracción no encontrada",
-        `No existe la atracción '${id}'.`,
-      );
-    }
-
-    const hoy = hoyEcuador();
-    const ocupados = await contarBoletosOcupados(
-      this.dataSource.manager,
-      atraccion.id,
-      fecha,
-    );
-    const restantesDia =
-      atraccion.estado === "ACTIVA" && fecha >= hoy
-        ? Math.max(atraccion.capacidad_diaria - ocupados, 0)
-        : 0;
-    const precioAdulto = round2(Number(atraccion.precio_base));
-    const precioNino = round2(precioAdulto * FACTOR_PRECIO.ninos);
-    const ahora = horaActualEcuador();
-
-    const turnos = HORARIOS_TURNO.map((hora24) => {
-      const yaInicio = fecha === hoy && hora24 <= ahora;
-      const disponibles = yaInicio ? 0 : restantesDia;
-      const estado =
-        disponibles === 0
-          ? "AGOTADO"
-          : disponibles <= UMBRAL_ULTIMOS_CUPOS
-            ? "ULTIMOS_CUPOS"
-            : "DISPONIBLE";
-      const legible = horaLegible(hora24);
-      return {
-        slot_id: slotId(fecha, hora24),
-        time: legible,
-        time_24h: `${hora24}:00`,
-        total_slots: atraccion.capacidad_diaria,
-        available_slots: disponibles,
-        status: estado,
-        price_adult: precioAdulto,
-        price_child: precioNino,
-        hora: legible,
-        hora_24h: `${hora24}:00`,
-        cupos_totales: atraccion.capacidad_diaria,
-        cupos_disponibles: disponibles,
-        estado,
-        precio_adulto_slot: precioAdulto,
-        precio_nino_slot: precioNino,
-      };
-    });
-
-    // No se suman los turnos: comparten el mismo aforo y se contaría doble.
-    const total = Math.max(...turnos.map((t) => t.available_slots), 0);
-    return {
-      atraccion_id: atraccion.id,
-      date: fecha,
-      fecha,
-      total_available_slots: total,
-      total_cupos_disponibles: total,
-      time_slots: turnos,
-      turnos,
-    };
   }
 
   async obtenerReserva(id: string) {
-    const reserva = await this.buscarReserva(this.dataSource.manager, id);
-    if (!reserva) throw reservaNoEncontrada(id);
-    return this.toResponse(reserva);
+    const vista = await this.buscarReserva(this.dataSource.manager, id);
+    if (!vista) throw reservaNoEncontrada(id);
+    return this.toResponse(vista);
   }
 
   // Compensación de la Saga: repetir la cancelación devuelve 200 con el mismo estado,
@@ -437,207 +308,60 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
     dto: CancelBookingReservaDto,
     correlationId: string,
   ) {
-    let liberada: { atraccionId: string; fecha: string } | null = null;
+    let liberada: { atrUuid: string; fecha: string } | null = null;
     const respuesta = await this.enTransaccion(
       "reserva.booking.cancelacion",
       correlationId,
       async (manager) => {
-        const reserva = await this.buscarReserva(manager, id, true);
-        if (!reserva) throw reservaNoEncontrada(id);
-
-        if (reserva.estado_reserva === EstadoReserva.CANCELADA) {
-          return this.toResponse(reserva);
-        }
-        if (reserva.checkin_at) {
-          throw problem(
-            HttpStatus.CONFLICT,
-            "ALREADY_CHECKED_IN",
-            "reserva-con-checkin",
-            "La reserva ya registró check-in",
-            `La reserva ${reserva.codigo_reserva} ya fue utilizada y no puede cancelarse.`,
-          );
-        }
-
-        reserva.estado_reserva = EstadoReserva.CANCELADA;
-        reserva.cancelada_at = new Date();
-        reserva.cancelacion_motivo = dto.reason?.trim() || null;
-        reserva.cancelacion_solicitante =
-          dto.solicitante ?? SolicitanteCancelacion.CLIENTE;
-        await manager.save(reserva);
-        await manager.update(
-          Factura,
-          { reserva: { id: reserva.id } },
-          { estado_pago: EstadoPago.REEMBOLSADO },
-        );
-        const detalle = reserva.detalles?.[0];
-        if (detalle?.atraccion) {
-          await this.outbox.registrarCambioReserva(
+        const vista = await this.buscarReserva(manager, id, true);
+        if (!vista) throw reservaNoEncontrada(id);
+        const solicitante = dto.solicitante ?? SolicitanteCancelacion.CLIENTE;
+        const motivo = dto.reason?.trim() || null;
+        try {
+          const cambio = await this.reservas.cancelar(
+            vista,
+            { motivo, solicitante },
             manager,
-            TipoEventoOutbox.RESERVA_CANCELADA,
-            {
-              reservaId: reserva.id,
-              codigo: reserva.codigo_reserva,
-              canal: reserva.canal,
-              atraccionId: detalle.atraccion.id,
-              fecha: String(reserva.fecha_reserva).slice(0, 10),
-              hora: reserva.hora_turno,
-              boletos: detalle.cantidad_boletos,
-              total: Number(detalle.subtotal),
-              extra: {
-                booking_reservation_id: reserva.booking_reservation_id,
-                cancellation_reason: reserva.cancelacion_motivo,
-                requested_by: reserva.cancelacion_solicitante,
-              },
-            },
           );
+          if (!cambio) return this.toResponse(vista);
+        } catch (err) {
+          if (err instanceof ReservaUsadaError) {
+            throw problem(
+              HttpStatus.CONFLICT,
+              "ALREADY_CHECKED_IN",
+              "reserva-con-checkin",
+              "La reserva ya registró check-in",
+              `La reserva ${vista.reserva.res_codigo} ya fue utilizada y no puede cancelarse.`,
+            );
+          }
+          throw err;
         }
-
+        const actual = await this.buscarReserva(
+          manager,
+          vista.reserva.res_uuid,
+        );
         this.log("reserva.booking.cancelada", correlationId, {
-          reservation_id: reserva.id,
-          reservation_code: reserva.codigo_reserva,
-          solicitante: reserva.cancelacion_solicitante,
-          reason: reserva.cancelacion_motivo,
-          tickets_liberados: reserva.detalles?.[0]?.cantidad_boletos ?? 0,
+          reservation_id: actual.reserva.res_uuid,
+          reservation_code: actual.reserva.res_codigo,
+          solicitante,
+          reason: motivo,
+          tickets_liberados: actual.reserva.res_numero_tickets,
         });
-        const atraccionId = reserva.detalles?.[0]?.atraccion?.id;
-        if (atraccionId) {
-          liberada = {
-            atraccionId,
-            fecha: String(reserva.fecha_reserva).slice(0, 10),
-          };
-        }
-        return this.toResponse(reserva);
+        liberada = {
+          atrUuid: actual.atraccion.atr_uuid,
+          fecha: actual.turno.fecha,
+        };
+        return this.toResponse(actual);
       },
     );
     // Después del commit, para que la lectura del aforo vea los cupos liberados.
-    if (liberada) {
-      void this.notificarStock(
-        liberada.atraccionId,
+    if (liberada)
+      void this.disponibilidad.notificarStock(
+        liberada.atrUuid,
         liberada.fecha,
         correlationId,
       );
-    }
     return respuesta;
-  }
-
-  onApplicationBootstrap() {
-    if (this.inventario.habilitado && this.diasSincronizacion > 0) {
-      void this.sincronizarCatalogo();
-    }
-  }
-
-  // Empuja a Booking los cupos de cada turno de esa fecha. Nunca lanza: devuelve
-  // false si Booking no respondió, para que la sincronización masiva se detenga.
-  // Un solo envío a la vez por atracción y fecha: si llega otro cambio mientras
-  // tanto, se repite al terminar con el aforo recién leído. El REST de Booking no
-  // lleva timestamp, así que esto evita que un valor viejo pise a uno nuevo.
-  notificarStock(
-    atraccionId: string,
-    fecha: string,
-    correlationId?: string,
-  ): Promise<boolean> {
-    if (!this.inventario.habilitado) return Promise.resolve(true);
-    const clave = `${atraccionId}|${fecha}`;
-    const enCurso = this.enviosStock.get(clave);
-    if (enCurso) {
-      enCurso.pendiente = true;
-      return enCurso.resultado;
-    }
-    const envio = { pendiente: false, resultado: null as Promise<boolean> };
-    envio.resultado = (async () => {
-      let ok = true;
-      try {
-        do {
-          envio.pendiente = false;
-          ok = await this.enviarStock(atraccionId, fecha, correlationId);
-        } while (envio.pendiente);
-      } finally {
-        this.enviosStock.delete(clave);
-      }
-      return ok;
-    })();
-    this.enviosStock.set(clave, envio);
-    return envio.resultado;
-  }
-
-  private async enviarStock(
-    atraccionId: string,
-    fecha: string,
-    correlationId?: string,
-  ): Promise<boolean> {
-    const timestamp = this.inventario.siguienteTimestamp();
-    try {
-      const disponibilidad = await this.consultarDisponibilidad(atraccionId, {
-        date: fecha,
-      });
-      const acks = await Promise.all(
-        disponibilidad.time_slots.map((turno) =>
-          this.inventario.enviarStock({
-            service_id: this.inventario.serviceId,
-            item_id: atraccionId,
-            date: fecha,
-            time_slot: turno.time_24h.slice(0, 5),
-            available_units: turno.available_slots,
-            timestamp,
-            slot_id: turno.slot_id,
-          }),
-        ),
-      );
-      this.log("inventario.booking.push", correlationId, {
-        canal: this.inventario.canal,
-        attraction_id: atraccionId,
-        date: fecha,
-        slots: disponibilidad.time_slots.map((t, i) => ({
-          slot_id: t.slot_id,
-          available_units: t.available_slots,
-          ack: acks[i]?.error_code || (acks[i]?.success ? "OK" : "ERROR"),
-        })),
-      });
-      return true;
-    } catch (err) {
-      this.logger.warn(
-        JSON.stringify({
-          event: "inventario.booking.push_fallido",
-          canal: this.inventario.canal,
-          correlation_id: correlationId,
-          attraction_id: atraccionId,
-          date: fecha,
-          code: err?.code,
-          error: err?.message,
-        }),
-      );
-      return false;
-    }
-  }
-
-  // Ventana de días hacia adelante: tras crear o editar la atracción (cambia el aforo).
-  async sincronizarAtraccion(atraccionId: string): Promise<boolean> {
-    if (!this.inventario.habilitado) return true;
-    const hoy = hoyEcuador();
-    for (let i = 0; i < this.diasSincronizacion; i++) {
-      if (!(await this.notificarStock(atraccionId, sumarDias(hoy, i)))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private async sincronizarCatalogo() {
-    const atracciones = await this.dataSource.manager.find(Atraccion, {
-      where: { estado: "ACTIVA" },
-      select: { id: true },
-    });
-    for (const { id } of atracciones) {
-      if (!(await this.sincronizarAtraccion(id))) {
-        this.logger.warn(
-          "Sincronización inicial de stock con Booking interrumpida: Booking no responde.",
-        );
-        return;
-      }
-    }
-    this.logger.log(
-      `Stock inicial enviado a Booking: ${atracciones.length} atracciones x ${this.diasSincronizacion} días.`,
-    );
   }
 
   async registrarCheckin(
@@ -650,19 +374,24 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
       "reserva.booking.checkin",
       correlationId,
       async (manager) => {
-        const reserva = await this.buscarReserva(manager, id, true);
-        if (!reserva) throw reservaNoEncontrada(id);
+        const vista = await this.buscarReserva(manager, id, true);
+        if (!vista) throw reservaNoEncontrada(id);
+        const { reserva } = vista;
 
-        if (reserva.estado_reserva !== EstadoReserva.CONFIRMADA) {
+        if (
+          vista.estado !== CodigoEstadoReserva.CONFIRMADA &&
+          vista.estado !== CodigoEstadoReserva.CHECKED_IN
+        ) {
           throw problem(
             HttpStatus.CONFLICT,
             "RESERVATION_NOT_ACTIVE",
             "reserva-no-activa",
             "La reserva no admite check-in",
-            `La reserva ${reserva.codigo_reserva} está ${this.estadoContrato(reserva)}.`,
+            `La reserva ${reserva.res_codigo} está ${estadoContrato(vista.estado)}.`,
           );
         }
-        if (dto.documento_identidad.toUpperCase() !== reserva.cliente?.dni) {
+        const titular = this.bookings.titular(reserva);
+        if (dto.documento_identidad.toUpperCase() !== titular?.pax_documento) {
           throw problem(
             HttpStatus.FORBIDDEN,
             "IDENTITY_MISMATCH",
@@ -673,7 +402,7 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         }
         if (
           dto.codigo_voucher_qr &&
-          !this.voucherValido(reserva, dto.codigo_voucher_qr)
+          !this.voucherValido(vista, dto.codigo_voucher_qr)
         ) {
           throw problem(
             HttpStatus.FORBIDDEN,
@@ -683,36 +412,57 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
             "El código QR presentado no corresponde a esta reserva.",
           );
         }
-
-        if (reserva.checkin_at) {
+        if (reserva.res_checkin_en) {
           // Reintento del mismo escaneo: se devuelve el pase ya emitido.
-          if (reserva.checkin_idempotency_key === idempotencyKey) {
-            return this.toCheckinResponse(reserva);
-          }
+          if (reserva.res_checkin_idempotencia === idempotencyKey)
+            return this.toCheckinResponse(vista);
           throw problem(
             HttpStatus.CONFLICT,
             "ALREADY_CHECKED_IN",
             "reserva-con-checkin",
             "La reserva ya registró check-in",
-            `La reserva ${reserva.codigo_reserva} registró check-in el ${reserva.checkin_at.toISOString()}.`,
+            `La reserva ${reserva.res_codigo} registró check-in el ${reserva.res_checkin_en.toISOString()}.`,
           );
         }
 
-        reserva.checkin_at = new Date();
-        reserva.checkin_guia =
-          dto.guia_asignado?.trim() || dto.guia_codigo?.trim() || null;
-        reserva.checkin_dispositivo = dto.scanner_device_id?.trim() || null;
-        reserva.checkin_idempotency_key = idempotencyKey;
-        await manager.save(reserva);
-
+        await this.bookings.actualizar(
+          reserva.res_id,
+          {
+            est_id: await this.bookings.estadoId(
+              CodigoEstadoReserva.CHECKED_IN,
+            ),
+            res_checkin_en: new Date(),
+            res_checkin_guia:
+              dto.guia_asignado?.trim() || dto.guia_codigo?.trim() || null,
+            res_checkin_dispositivo: dto.scanner_device_id?.trim() || null,
+            res_checkin_idempotencia: idempotencyKey,
+          },
+          manager,
+        );
+        const actual = await this.buscarReserva(manager, reserva.res_uuid);
         this.log("reserva.booking.checkin", correlationId, {
-          reservation_id: reserva.id,
-          reservation_code: reserva.codigo_reserva,
-          guia: reserva.checkin_guia,
-          dispositivo: reserva.checkin_dispositivo,
+          reservation_id: reserva.res_uuid,
+          reservation_code: reserva.res_codigo,
+          guia: actual.reserva.res_checkin_guia,
+          dispositivo: actual.reserva.res_checkin_dispositivo,
         });
-        return this.toCheckinResponse(reserva);
+        return this.toCheckinResponse(actual);
       },
+    );
+  }
+
+  private sinCupo(
+    nombre: string,
+    datos: ReservaNormalizada,
+    restantes: number,
+  ) {
+    return problem(
+      HttpStatus.CONFLICT,
+      "OUT_OF_STOCK",
+      "sin-cupos",
+      "Cupos Agotados para el Turno Solicitado",
+      `La atracción ${nombre} no dispone de ${datos.totalBoletos} cupos para el ` +
+        `${datos.fecha} (${horaLegible(datos.hora)}). Cupos restantes: ${restantes}.`,
     );
   }
 
@@ -738,11 +488,10 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
       invalid.push({ name: "customer.document_id", reason: "Es obligatorio." });
 
     const hora = horaRaw ? toHora24(horaRaw) : null;
-    if (horaRaw && !hora) {
+    if (horaRaw && !hora)
       invalid.push({ name: "time", reason: `Hora inválida: '${horaRaw}'.` });
-    }
 
-    const pasajeros: Pasajeros = {
+    const pasajeros = {
       adultos: dto.adult_count,
       ninos: dto.child_count ?? 0,
       seniors: dto.senior_count ?? 0,
@@ -759,7 +508,6 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         reason: `Debe ser ${totalBoletos} (suma de adultos, niños, seniors e infantes).`,
       });
     }
-
     if (invalid.length) {
       throw problem(
         HttpStatus.BAD_REQUEST,
@@ -798,7 +546,6 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
           ".",
       );
     }
-
     const hoy = hoyEcuador();
     if (fecha < hoy || (fecha === hoy && horaSlot <= horaActualEcuador())) {
       throw problem(
@@ -810,30 +557,28 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
       );
     }
 
+    const doc = documento.toUpperCase();
     return {
       atraccionId,
       fecha,
       hora: horaSlot,
-      slotId: dto.slot_id,
       pasajeros,
       totalBoletos,
       nombre,
       email: email.toLowerCase(),
       telefono: c.phone ?? c.telefono ?? null,
-      documento: documento.toUpperCase(),
+      documento: doc,
       tipoDocumento:
-        c.document_type ?? c.tipo_documento ?? TipoDocumento.CEDULA,
-      metodoPago: dto.payment_method?.method ?? "BOOKING",
+        c.document_type ?? c.tipo_documento ?? inferirTipoDocumento(doc),
+      metodoPago: dto.payment_method?.method ?? null,
       solicitudes: dto.special_requirements?.trim() || null,
       bookingReservationId: dto.booking_reservation_id ?? null,
     };
   }
 
-  private buscarPorIdempotencia(key: string): Promise<Reserva | null> {
-    return this.dataSource.getRepository(Reserva).findOne({
-      where: { idempotency_key: key },
-      relations: RELACIONES,
-    });
+  private async respuestaDe(resUuid: string) {
+    const vista = await this.buscarReserva(this.dataSource.manager, resUuid);
+    return this.toResponse(vista);
   }
 
   // Acepta UUID, código PNR (ECT-XXXXXX) o el booking_reservation_id de Booking.
@@ -842,30 +587,31 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
     manager: EntityManager,
     id: string,
     bloquear = false,
-  ): Promise<Reserva | null> {
+  ): Promise<VistaReserva | null> {
     const valor = id.trim();
-    const where = UUID_REGEX.test(valor)
-      ? { id: valor }
-      : CODE_REGEX.test(valor.toUpperCase())
-        ? { codigo_reserva: valor.toUpperCase() }
-        : { booking_reservation_id: valor };
-
-    // FOR UPDATE no admite LEFT JOIN en PostgreSQL: primero se bloquea la fila.
-    const base = await manager.findOne(Reserva, {
-      where: { ...where, canal: CanalReserva.BOOKING },
-      ...(bloquear && { lock: { mode: "pessimistic_write" as const } }),
-    });
-    if (!base) return null;
-    return manager.findOne(Reserva, {
-      where: { id: base.id },
-      relations: RELACIONES,
-    });
+    let reserva: Reserva | null = null;
+    if (UUID_REGEX.test(valor)) {
+      reserva = await this.bookings.porUuid(valor, manager);
+    } else if (CODE_REGEX.test(valor.toUpperCase())) {
+      reserva = await this.bookings.porCodigo(valor.toUpperCase(), manager);
+    } else {
+      const ordenes = await this.orders.porReferenciaExterna(valor);
+      [reserva] = await this.bookings.porOrdenes(
+        ordenes.map((o) => o.ord_id),
+        manager,
+      );
+    }
+    if (!reserva) return null;
+    if (bloquear)
+      reserva = await this.bookings.bloquear(reserva.res_id, manager);
+    const vista = await this.reservas.vista(reserva, manager);
+    return vista.orden?.ord_canal === CanalOrden.BOOKING ? vista : null;
   }
 
   private async enTransaccion<T>(
     evento: string,
     correlationId: string,
-    fn: (manager: EntityManager) => Promise<T>,
+    fn: (m: EntityManager) => Promise<T>,
   ): Promise<T> {
     try {
       return await this.dataSource.transaction(fn);
@@ -890,33 +636,6 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
     }
   }
 
-  // El turista de Booking no tiene cuenta local: se identifica por documento.
-  private async obtenerCliente(
-    manager: EntityManager,
-    datos: ReservaNormalizada,
-  ): Promise<Cliente> {
-    await manager
-      .createQueryBuilder()
-      .insert()
-      .into(Cliente)
-      .values({
-        dni: datos.documento,
-        nombre_completo: datos.nombre,
-        telefono: datos.telefono,
-      })
-      .orIgnore()
-      .execute();
-    return manager.findOneOrFail(Cliente, { where: { dni: datos.documento } });
-  }
-
-  private generarCodigo(): string {
-    let code = "ECT-";
-    for (let i = 0; i < 6; i++) {
-      code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
-    }
-    return code;
-  }
-
   private firma(ambito: string, payload: string): string {
     return createHmac("sha256", this.voucherSecret)
       .update(`${ambito}.${payload}`)
@@ -928,119 +647,119 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
     return `${payload}.${this.firma(ambito, payload)}`;
   }
 
-  private firmarVoucher(reserva: Reserva): string {
+  private firmarVoucher(v: VistaReserva): string {
     return this.sellar("voucher", {
-      rid: reserva.id,
-      code: reserva.codigo_reserva,
-      date: String(reserva.fecha_reserva).slice(0, 10),
-      time: reserva.hora_turno,
+      rid: v.reserva.res_uuid,
+      code: v.reserva.res_codigo,
+      date: v.turno.fecha,
+      time: v.turno.hora,
     });
   }
 
-  private voucherValido(reserva: Reserva, codigo: string): boolean {
+  private voucherValido(v: VistaReserva, codigo: string): boolean {
     const valor = codigo.trim();
-    if (valor.toUpperCase() === reserva.codigo_reserva) return true;
+    if (valor.toUpperCase() === v.reserva.res_codigo) return true;
     const [payload, firma] = valor.split(".");
     if (!payload || !firma) return false;
     if (!igualSeguro(firma, this.firma("voucher", payload))) return false;
     try {
       const data = JSON.parse(Buffer.from(payload, "base64url").toString());
-      return data?.rid === reserva.id;
+      return data?.rid === v.reserva.res_uuid;
     } catch {
       return false;
     }
   }
 
-  private estadoContrato(reserva: Reserva): string {
-    if (reserva.estado_reserva === EstadoReserva.CANCELADA) return "CANCELLED";
-    if (reserva.estado_reserva === EstadoReserva.CONFIRMADA) {
-      return reserva.checkin_at ? "CHECKED_IN" : "CONFIRMED";
-    }
-    return "PENDING";
+  private puntoEncuentro(v: VistaReserva): string {
+    return v.atraccion?.atr_punto_encuentro || PUNTO_ENCUENTRO;
   }
 
-  private toCheckinResponse(reserva: Reserva) {
-    const horaCheckin = reserva.checkin_at.toISOString();
+  private toCheckinResponse(v: VistaReserva) {
+    const { reserva } = v;
+    const titular = this.bookings.titular(reserva);
+    const horaCheckin = reserva.res_checkin_en.toISOString();
     return {
       success: true,
-      reserva_id: reserva.id,
-      reservation_code: reserva.codigo_reserva,
+      reserva_id: reserva.res_uuid,
+      reservation_code: reserva.res_codigo,
       estado: "CHECKED_IN",
       status: "CHECKED_IN",
-      titular_nombre: reserva.cliente?.nombre_completo,
-      titular_documento: reserva.cliente?.dni,
-      guia_asignado: reserva.checkin_guia ?? "Por asignar",
-      punto_encuentro: PUNTO_ENCUENTRO,
+      titular_nombre: titular?.pax_nombre,
+      titular_documento: titular?.pax_documento,
+      guia_asignado: reserva.res_checkin_guia ?? "Por asignar",
+      punto_encuentro: this.puntoEncuentro(v),
       hora_checkin: horaCheckin,
       pase_abordar_qr: this.sellar("pase", {
-        rid: reserva.id,
-        code: reserva.codigo_reserva,
+        rid: reserva.res_uuid,
+        code: reserva.res_codigo,
         checkin: horaCheckin,
       }),
     };
   }
 
-  private toResponse(reserva: Reserva) {
-    const detalle = reserva.detalles?.[0];
-    const p = reserva.pasajeros;
-    const fecha = String(reserva.fecha_reserva).slice(0, 10);
-    const hora = reserva.hora_turno ? horaLegible(reserva.hora_turno) : null;
-    const total = Number(detalle?.subtotal ?? 0);
-    const status = this.estadoContrato(reserva);
-    const self = `/api/v3/atracciones/reservas/${reserva.id}`;
-    const cliente = reserva.cliente;
+  private toResponse(v: VistaReserva) {
+    const { reserva, orden, turno } = v;
+    const status = estadoContrato(v.estado);
+    const hora = horaLegible(turno.hora);
+    const total = reserva.res_subtotal;
+    const self = `/api/v3/atracciones/reservas/${reserva.res_uuid}`;
+    const titular = this.bookings.titular(reserva);
+    const documento = titular?.pax_documento ?? null;
 
     return {
       success: true,
       message: MENSAJE_ESTADO[status],
-      external_order_id: `ORD-${reserva.codigo_reserva}`,
-      reservation_id: reserva.id,
-      reservation_code: reserva.codigo_reserva,
+      external_order_id: orden.ord_numero,
+      reservation_id: reserva.res_uuid,
+      reservation_code: reserva.res_codigo,
       status,
       estado: status,
-      attraction_id: detalle?.atraccion?.id,
-      slot_id: reserva.slot_id,
-      date: fecha,
-      fecha,
+      attraction_id: v.atraccion?.atr_uuid,
+      slot_id: `slot-${turno.fecha.replace(/-/g, "")}-${turno.hora.replace(":", "")}`,
+      date: turno.fecha,
+      fecha: turno.fecha,
       time: hora,
       hora,
-      time_24h: reserva.hora_turno ? `${reserva.hora_turno}:00` : null,
-      ticket_count: detalle?.cantidad_boletos ?? 0,
-      adult_count: p?.adultos ?? 0,
-      child_count: p?.ninos ?? 0,
-      senior_count: p?.seniors ?? 0,
+      time_24h: `${turno.hora}:00`,
+      ticket_count: reserva.res_numero_tickets,
+      adult_count: reserva.res_adultos,
+      child_count: reserva.res_ninos,
+      senior_count: reserva.res_seniors,
       student_count: 0,
-      infant_count: p?.infantes ?? 0,
-      cantidad_adultos: p?.adultos ?? 0,
-      cantidad_ninos: p?.ninos ?? 0,
-      cantidad_seniors: p?.seniors ?? 0,
+      infant_count: reserva.res_infantes,
+      cantidad_adultos: reserva.res_adultos,
+      cantidad_ninos: reserva.res_ninos,
+      cantidad_seniors: reserva.res_seniors,
       cantidad_estudiantes: 0,
-      cantidad_infantes: p?.infantes ?? 0,
+      cantidad_infantes: reserva.res_infantes,
       total_price: total,
       precio_total: total,
       currency: "USD",
       moneda: "USD",
-      booking_reservation_id: reserva.booking_reservation_id,
-      customer: cliente && {
-        full_name: cliente.nombre_completo,
-        nombre_completo: cliente.nombre_completo,
-        email: reserva.contacto_email,
-        correo: reserva.contacto_email,
-        phone: cliente.telefono,
-        telefono: cliente.telefono,
-        document_type: inferirTipoDocumento(cliente.dni),
-        document_id: cliente.dni,
+      booking_reservation_id: orden.ord_referencia_externa,
+      customer: titular && {
+        full_name: titular.pax_nombre,
+        nombre_completo: titular.pax_nombre,
+        email: orden.ord_contacto_correo,
+        correo: orden.ord_contacto_correo,
+        phone: orden.ord_contacto_telefono,
+        telefono: orden.ord_contacto_telefono,
+        document_type:
+          documento === CONSUMIDOR_FINAL
+            ? TipoDocumento.RUC
+            : inferirTipoDocumento(documento),
+        document_id: documento,
       },
-      guia_asignado: reserva.checkin_guia ?? "Por asignar",
-      punto_encuentro: PUNTO_ENCUENTRO,
-      voucher_qr_payload: this.firmarVoucher(reserva),
-      ...(reserva.checkin_at && {
-        hora_checkin: reserva.checkin_at.toISOString(),
+      guia_asignado: reserva.res_checkin_guia ?? "Por asignar",
+      punto_encuentro: this.puntoEncuentro(v),
+      voucher_qr_payload: this.firmarVoucher(v),
+      ...(reserva.res_checkin_en && {
+        hora_checkin: reserva.res_checkin_en.toISOString(),
       }),
       ...(status === "CANCELLED" && {
-        reembolso_id: `REF-${reserva.codigo_reserva}`,
-        monto_reembolsado: total,
-        cancelled_at: reserva.cancelada_at?.toISOString() ?? null,
+        reembolso_id: v.reembolso?.rem_numero ?? `REF-${reserva.res_codigo}`,
+        monto_reembolsado: v.reembolso?.rem_monto ?? total,
+        cancelled_at: reserva.res_cancelado_en?.toISOString() ?? null,
       }),
       _links: {
         self,

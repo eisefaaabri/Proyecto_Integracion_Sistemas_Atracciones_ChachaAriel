@@ -1,31 +1,66 @@
-import { Injectable, UnauthorizedException, ConflictException } from "@nestjs/common";
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { InjectDataSource } from "@nestjs/typeorm";
+import { DataSource } from "typeorm";
 import * as bcrypt from "bcrypt";
-import { Usuario, RolUsuario } from "./entities/usuario.entity";
-import { Cliente } from "../atracciones/entities/cliente.entity";
+import {
+  IdentityService,
+  NombreRol,
+  nombreCompleto,
+} from "../identity/identity.service";
+import { Usuario } from "../identity/identity.entities";
+import { BillingProfileService } from "../billing-profile/billing-profile.service";
+import { RolUsuario } from "./rol-usuario.enum";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 
+const rolModelo = (rol: RolUsuario): NombreRol =>
+  rol === RolUsuario.ADMIN ? "ADMIN" : "CLIENTE";
+
 @Injectable()
 export class AuthService {
   constructor(
-    @InjectRepository(Usuario)
-    private readonly usuarioRepository: Repository<Usuario>,
-    @InjectRepository(Cliente)
-    private readonly clienteRepository: Repository<Cliente>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly identity: IdentityService,
+    private readonly billing: BillingProfileService,
     private readonly jwtService: JwtService,
   ) {}
 
+  private sesion(u: Usuario) {
+    const rol = this.identity.rolApi(u);
+    // El sub es el UUID público del usuario (usu_uuid): el resto de la app lo usa así.
+    const payload = { email: u.usu_correo, sub: u.usu_uuid, rol, roles: [rol] };
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: { id: u.usu_uuid, email: u.usu_correo, rol },
+    };
+  }
+
+  private vistaUsuario(u: Usuario) {
+    return {
+      id: u.usu_uuid,
+      email: u.usu_correo,
+      rol: this.identity.rolApi(u),
+      estado: u.usu_activo,
+      created_at: u.usu_creado_en,
+      nombre_completo: nombreCompleto(u) || null,
+      dni: u.usu_documento,
+      telefono: u.usu_telefono,
+    };
+  }
+
   async validateUser(email: string, pass: string): Promise<Usuario> {
-    const user = await this.usuarioRepository.findOne({ where: { email } });
-    if (!user || !user.estado) {
-      throw new UnauthorizedException("Credenciales inválidas");
-    }
-    const isMatch = await bcrypt.compare(pass, user.password_hash);
-    if (!isMatch) {
+    const user = await this.identity.findByCorreoConPassword(email);
+    if (
+      !user ||
+      !user.usu_activo ||
+      !(await bcrypt.compare(pass, user.usu_password))
+    ) {
       throw new UnauthorizedException("Credenciales inválidas");
     }
     return user;
@@ -33,217 +68,101 @@ export class AuthService {
 
   async login(loginDto: LoginDto) {
     const user = await this.validateUser(loginDto.email, loginDto.password);
-
-    // El sub DEBE ser el UUIDv4 del usuario para que el resto de la app funcione.
-    const payload = {
-      email: user.email,
-      sub: user.id,
-      rol: user.rol,
-      roles: [user.rol],
-    };
-
-    return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        email: user.email,
-        rol: user.rol,
-      },
-    };
+    await this.identity.registrarAcceso(user.usu_id);
+    return this.sesion(user);
   }
 
-  /**
-   * Alta de cuenta pública (rol TURISTA).
-   * Crea usuario + cliente (necesario para reservar, reseñas y wishlist).
-   * Devuelve el mismo shape que /login para que el frontend quede con sesión.
-   */
-  async register(registerDto: RegisterDto) {
-    const connection = this.usuarioRepository.manager.connection;
-    const queryRunner = connection.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+  /** Alta de cuenta pública (rol CLIENTE, expuesto como TURISTA) con sesión iniciada. */
+  async register(dto: RegisterDto) {
+    const usuario = await this.crearCuenta({
+      email: dto.email,
+      password: dto.password,
+      nombre_completo: dto.nombre_completo,
+      dni: dto.dni,
+      telefono: dto.telefono,
+      rol: RolUsuario.TURISTA,
+    });
+    return this.sesion(usuario);
+  }
 
+  async createUser(dto: CreateUserDto) {
+    const usuario = await this.crearCuenta({
+      ...dto,
+      rol: dto.rol ?? RolUsuario.ADMIN,
+    });
+    return this.vistaUsuario(usuario);
+  }
+
+  private async crearCuenta(d: {
+    email: string;
+    password: string;
+    nombre_completo?: string;
+    dni?: string;
+    telefono?: string;
+    rol: RolUsuario;
+  }): Promise<Usuario> {
+    const passwordHash = await bcrypt.hash(d.password, 10);
     try {
-      // Pre-checks con mensajes limpios (además de los constraints únicos).
-      const emailEnUso = await queryRunner.manager.findOne(Usuario, {
-        where: { email: registerDto.email },
-      });
-      if (emailEnUso) {
-        throw new ConflictException("El email ya está registrado");
-      }
-      const dniEnUso = await queryRunner.manager.findOne(Cliente, {
-        where: { dni: registerDto.dni },
-      });
-      if (dniEnUso) {
-        throw new ConflictException(
-          "El DNI ingresado ya pertenece a otra cuenta",
-        );
-      }
-
-      const passwordHash = await bcrypt.hash(registerDto.password, 10);
-      const usuario = queryRunner.manager.create(Usuario, {
-        email: registerDto.email,
-        password_hash: passwordHash,
-        rol: RolUsuario.TURISTA,
-        estado: true,
-      });
-      await queryRunner.manager.save(usuario);
-
-      const cliente = queryRunner.manager.create(Cliente, {
-        dni: registerDto.dni,
-        nombre_completo: registerDto.nombre_completo,
-        telefono: registerDto.telefono ?? null,
-        usuario,
-      });
-      await queryRunner.manager.save(cliente);
-
-      await queryRunner.commitTransaction();
-
-      const payload = {
-        email: usuario.email,
-        sub: usuario.id,
-        rol: usuario.rol,
-        roles: [usuario.rol],
-      };
-
-      return {
-        access_token: this.jwtService.sign(payload),
-        user: {
-          id: usuario.id,
-          email: usuario.email,
-          rol: usuario.rol,
-        },
-      };
-    } catch (err) {
-      await queryRunner.rollbackTransaction();
-      // Si algún unique constraint saltó en carrera (email o DNI), responder 409.
-      if (String(err?.code) === "23505") {
-        const constraint = String(err?.constraint ?? "");
-        if (constraint.includes("dni") || constraint.includes("cliente")) {
+      return await this.dataSource.transaction(async (m) => {
+        // Pre-checks con mensajes limpios (además de los constraints únicos).
+        if (await this.identity.existeCorreo(d.email, m)) {
+          throw new ConflictException("El email ya está registrado");
+        }
+        if (d.dni && (await this.identity.existeDocumento(d.dni, m))) {
           throw new ConflictException(
             "El DNI ingresado ya pertenece a otra cuenta",
           );
         }
-        throw new ConflictException("El email ya está registrado");
+        const usuario = await this.identity.crear(
+          {
+            correo: d.email,
+            passwordHash,
+            nombreCompleto: d.nombre_completo,
+            documento: d.dni,
+            telefono: d.telefono,
+            rol: rolModelo(d.rol),
+          },
+          m,
+        );
+        await this.billing.crearPrincipal(
+          usuario.usu_id,
+          d.dni,
+          d.nombre_completo || nombreCompleto(usuario),
+          d.email,
+          d.telefono ?? null,
+          m,
+        );
+        return usuario;
+      });
+    } catch (err) {
+      // Si algún unique constraint saltó en carrera (email o DNI), responder 409.
+      if (String(err?.code) === "23505") {
+        const constraint = String(err?.constraint ?? "");
+        throw new ConflictException(
+          constraint.includes("documento")
+            ? "El DNI ingresado ya pertenece a otra cuenta"
+            : "El email ya está registrado",
+        );
       }
       throw err;
-    } finally {
-      await queryRunner.release();
     }
-  }
-
-  async createUser(createUserDto: CreateUserDto) {
-    const emailEnUso = await this.usuarioRepository.findOne({
-      where: { email: createUserDto.email },
-    });
-    if (emailEnUso) {
-      throw new ConflictException("El email ya está registrado");
-    }
-
-    const rol = createUserDto.rol ?? RolUsuario.ADMIN;
-    const passwordHash = await bcrypt.hash(createUserDto.password, 10);
-
-    if (createUserDto.dni && createUserDto.nombre_completo) {
-      const connection = this.usuarioRepository.manager.connection;
-      const queryRunner = connection.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-
-      try {
-        const dniEnUso = await queryRunner.manager.findOne(Cliente, {
-          where: { dni: createUserDto.dni },
-        });
-        if (dniEnUso) {
-          throw new ConflictException("El DNI ingresado ya pertenece a otra cuenta");
-        }
-
-        const usuario = queryRunner.manager.create(Usuario, {
-          email: createUserDto.email,
-          password_hash: passwordHash,
-          rol,
-          estado: true,
-        });
-        await queryRunner.manager.save(usuario);
-
-        const cliente = queryRunner.manager.create(Cliente, {
-          dni: createUserDto.dni,
-          nombre_completo: createUserDto.nombre_completo,
-          telefono: createUserDto.telefono ?? null,
-          usuario,
-        });
-        await queryRunner.manager.save(cliente);
-
-        await queryRunner.commitTransaction();
-
-        return {
-          id: usuario.id,
-          email: usuario.email,
-          rol: usuario.rol,
-          estado: usuario.estado,
-          created_at: usuario.created_at,
-          nombre_completo: cliente.nombre_completo,
-          dni: cliente.dni,
-          telefono: cliente.telefono,
-        };
-      } catch (err) {
-        await queryRunner.rollbackTransaction();
-        if (String(err?.code) === "23505") {
-          throw new ConflictException("El email o DNI ya está registrado");
-        }
-        throw err;
-      } finally {
-        await queryRunner.release();
-      }
-    }
-
-    const usuario = this.usuarioRepository.create({
-      email: createUserDto.email,
-      password_hash: passwordHash,
-      rol,
-      estado: true,
-    });
-    await this.usuarioRepository.save(usuario);
-
-    return {
-      id: usuario.id,
-      email: usuario.email,
-      rol: usuario.rol,
-      estado: usuario.estado,
-      created_at: usuario.created_at,
-      nombre_completo: null,
-      dni: null,
-      telefono: null,
-    };
   }
 
   async getAllUsers() {
-    const users = await this.usuarioRepository.find({
-      relations: ["cliente"],
-      order: { created_at: "DESC" },
-    });
-    return users.map((u) => ({
-      id: u.id,
-      email: u.email,
-      rol: u.rol,
-      estado: u.estado,
-      created_at: u.created_at,
-      nombre_completo: u.cliente?.nombre_completo ?? null,
-      dni: u.cliente?.dni ?? null,
-      telefono: u.cliente?.telefono ?? null,
-    }));
+    return (await this.identity.listar()).map((u) => this.vistaUsuario(u));
   }
 
   async updateUserRole(id: string, rol: RolUsuario) {
-    const user = await this.usuarioRepository.findOne({ where: { id } });
-    if (!user) {
-      throw new ConflictException("Usuario no encontrado");
-    }
-    user.rol = rol;
-    await this.usuarioRepository.save(user);
+    const usuario = await this.identity.findByUuid(id);
+    if (!usuario) throw new ConflictException("Usuario no encontrado");
+    await this.dataSource.transaction((m) =>
+      this.identity.cambiarRol(usuario, rolModelo(rol), m),
+    );
+    const actualizado = await this.identity.findByUuid(id);
     return {
-      id: user.id,
-      email: user.email,
-      rol: user.rol,
+      id: actualizado.usu_uuid,
+      email: actualizado.usu_correo,
+      rol: this.identity.rolApi(actualizado),
     };
   }
 }

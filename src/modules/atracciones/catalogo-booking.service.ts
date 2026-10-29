@@ -1,16 +1,11 @@
 import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { InjectRepository } from "@nestjs/typeorm";
-import { IsNull, Repository } from "typeorm";
-import { Categoria } from "./entities/categoria.entity";
-import { ContratoPromociones } from "./entities/contrato-promociones.entity";
+import { CatalogService } from "../catalog/catalog.service";
+import { Categoria } from "../catalog/catalog.entities";
+import { PricingService } from "../pricing/pricing.service";
+import { ContratoPromocion } from "../pricing/pricing.entities";
 import { ActualizarPromocionesContratoDto } from "./dto/catalogo-booking.dto";
-import { hoyEcuador, problem } from "./booking.utils";
-
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CONTRATO_ID = 1;
-const ORDEN = { orden: "ASC", nombre: "ASC" } as const;
+import { UUID_REGEX, hoyEcuador, problem } from "./booking.utils";
 
 export interface NodoCategoria extends ReturnType<typeof toCategoriaPlana> {
   descripcion: string | null;
@@ -19,19 +14,19 @@ export interface NodoCategoria extends ReturnType<typeof toCategoriaPlana> {
   subcategorias: NodoCategoria[];
 }
 
-function toCategoriaPlana(c: Categoria) {
+function toCategoriaPlana(c: Categoria, uuidPorId: Map<number, string>) {
   return {
-    id: c.id,
-    padre_id: c.padre_id ?? null,
-    nombre: c.nombre,
-    slug: c.slug,
-    incluye_comida: c.incluye_comida,
-    incluye_transporte: c.incluye_transporte,
-    incluye_guia: c.incluye_guia,
+    id: c.cat_uuid,
+    padre_id: c.cat_padre_id ? (uuidPorId.get(c.cat_padre_id) ?? null) : null,
+    nombre: c.cat_nombre,
+    slug: c.cat_slug,
+    incluye_comida: c.cat_incluye_comida,
+    incluye_transporte: c.cat_incluye_transporte,
+    incluye_guia: c.cat_incluye_guia,
     // Alias en inglés de la guía de socios (RDA2 §6).
-    includes_food: c.incluye_comida,
-    includes_transport: c.incluye_transporte,
-    includes_guide: c.incluye_guia,
+    includes_food: c.cat_incluye_comida,
+    includes_transport: c.cat_incluye_transporte,
+    includes_guide: c.cat_incluye_guia,
   };
 }
 
@@ -41,10 +36,8 @@ export class CatalogoBookingService {
   private readonly proveedorId: string;
 
   constructor(
-    @InjectRepository(Categoria)
-    private readonly categorias: Repository<Categoria>,
-    @InjectRepository(ContratoPromociones)
-    private readonly contratos: Repository<ContratoPromociones>,
+    private readonly catalog: CatalogService,
+    private readonly pricing: PricingService,
     config: ConfigService,
   ) {
     this.proveedorId = config.get<string>(
@@ -54,42 +47,45 @@ export class CatalogoBookingService {
   }
 
   async arbolCategorias(): Promise<NodoCategoria[]> {
-    const todas = await this.categorias.find({ order: ORDEN });
-    const nodos = new Map<string, NodoCategoria>(
+    const todas = await this.catalog.categoriasActivas();
+    const uuids = new Map(todas.map((c) => [c.cat_id, c.cat_uuid]));
+    const nodos = new Map<number, NodoCategoria>(
       todas.map((c) => [
-        c.id,
+        c.cat_id,
         {
-          ...toCategoriaPlana(c),
-          descripcion: c.descripcion ?? null,
-          icono: c.icono ?? null,
-          orden: c.orden,
+          ...toCategoriaPlana(c, uuids),
+          descripcion: c.cat_descripcion ?? null,
+          icono: c.cat_icono ?? null,
+          orden: c.cat_orden,
           subcategorias: [],
         },
       ]),
     );
     const raices: NodoCategoria[] = [];
     for (const c of todas) {
-      const nodo = nodos.get(c.id);
-      const padre = c.padre_id ? nodos.get(c.padre_id) : undefined;
-      (padre ? padre.subcategorias : raices).push(nodo);
+      const padre = c.cat_padre_id ? nodos.get(c.cat_padre_id) : undefined;
+      (padre ? padre.subcategorias : raices).push(nodos.get(c.cat_id));
     }
     return raices;
   }
 
-  async listarCategorias(padreId?: string) {
-    if (padreId && !UUID_REGEX.test(padreId)) return [];
-    const categorias = await this.categorias.find({
-      where: { padre_id: padreId ?? IsNull() },
-      order: ORDEN,
-    });
-    return categorias.map(toCategoriaPlana);
+  async listarCategorias(padreUuid?: string) {
+    if (padreUuid && !UUID_REGEX.test(padreUuid)) return [];
+    const todas = await this.catalog.categoriasActivas();
+    const uuids = new Map(todas.map((c) => [c.cat_id, c.cat_uuid]));
+    const padre = padreUuid
+      ? todas.find((c) => c.cat_uuid === padreUuid)
+      : undefined;
+    if (padreUuid && !padre) return [];
+    return todas
+      .filter((c) =>
+        padre ? c.cat_padre_id === padre.cat_id : c.cat_padre_id === null,
+      )
+      .map((c) => toCategoriaPlana(c, uuids));
   }
 
   async obtenerContrato() {
-    const contrato = await this.contratos.findOne({
-      where: { id: CONTRATO_ID },
-    });
-    return this.toContratoResponse(contrato);
+    return this.toContratoResponse(await this.pricing.contrato());
   }
 
   async actualizarContrato(dto: ActualizarPromocionesContratoDto) {
@@ -129,24 +125,21 @@ export class CatalogoBookingService {
         return true;
       });
 
-    const contrato = await this.contratos.save(
-      this.contratos.create({
-        id: CONTRATO_ID,
-        permite_promociones: dto.permite_promociones,
-        porcentaje_descuento_maximo: dto.porcentaje_descuento_maximo,
-        destinos_habilitados: destinos,
-        fecha_acuerdo: hoy,
-        vigencia_hasta: dto.vigencia_hasta ?? null,
-        condiciones_combo: dto.condiciones_combo?.trim() || null,
-        contacto_nombre: dto.contacto_comercial?.nombre?.trim() || null,
-        contacto_email: dto.contacto_comercial?.email?.toLowerCase() || null,
-      }),
-    );
+    const contrato = await this.pricing.guardarContrato({
+      permite: dto.permite_promociones,
+      porcentaje: dto.porcentaje_descuento_maximo,
+      destinos,
+      fechaAcuerdo: hoy,
+      vigenciaHasta: dto.vigencia_hasta ?? null,
+      condiciones: dto.condiciones_combo?.trim() || null,
+      contactoNombre: dto.contacto_comercial?.nombre?.trim() || null,
+      contactoCorreo: dto.contacto_comercial?.email?.toLowerCase() || null,
+    });
     this.logger.log(
       JSON.stringify({
         event: "promociones.contrato.actualizado",
-        permite_promociones: contrato.permite_promociones,
-        porcentaje_descuento_maximo: contrato.porcentaje_descuento_maximo,
+        permite_promociones: contrato.cpr_permite_promociones,
+        porcentaje_descuento_maximo: contrato.cpr_porcentaje_maximo,
         destinos: destinos.length,
       }),
     );
@@ -154,21 +147,23 @@ export class CatalogoBookingService {
   }
 
   // Sin fila, la tienda aún no respondió el cuestionario: no acepta promociones.
-  private toContratoResponse(c: ContratoPromociones | null) {
+  private toContratoResponse(c: ContratoPromocion | null) {
     const contacto =
-      c?.contacto_nombre || c?.contacto_email
-        ? { nombre: c.contacto_nombre, email: c.contacto_email }
+      c?.cpr_contacto_nombre || c?.cpr_contacto_correo
+        ? { nombre: c.cpr_contacto_nombre, email: c.cpr_contacto_correo }
         : null;
     return {
       proveedor_id: this.proveedorId,
       nombre_comercial: "Ecuatravel",
       cuestionario_respondido: Boolean(c),
-      permite_promociones: c?.permite_promociones ?? false,
-      porcentaje_descuento_maximo: Number(c?.porcentaje_descuento_maximo ?? 0),
-      destinos_habilitados: c?.destinos_habilitados ?? [],
-      fecha_acuerdo: c?.fecha_acuerdo ?? null,
-      vigencia_hasta: c?.vigencia_hasta ?? null,
-      condiciones_combo: c?.condiciones_combo ?? null,
+      permite_promociones: c?.cpr_permite_promociones ?? false,
+      porcentaje_descuento_maximo: Number(c?.cpr_porcentaje_maximo ?? 0),
+      destinos_habilitados: [...(c?.destinos ?? [])]
+        .sort((a, b) => a.cpd_orden - b.cpd_orden)
+        .map((d) => d.cpd_nombre),
+      fecha_acuerdo: c?.cpr_fecha_acuerdo ?? null,
+      vigencia_hasta: c?.cpr_vigencia_hasta ?? null,
+      condiciones_combo: c?.cpr_condiciones ?? null,
       contacto_comercial: contacto,
     };
   }

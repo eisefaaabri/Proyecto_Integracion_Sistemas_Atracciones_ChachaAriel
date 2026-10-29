@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import { IsEnum, IsInt, IsOptional, Max, Min } from "class-validator";
-import { TipoEventoOutbox } from "../entities/outbox-evento.entity";
+import { TipoEventoOutbox } from "../../booking/booking.entities";
 
 export class EventosQueryDto {
   @ApiPropertyOptional({

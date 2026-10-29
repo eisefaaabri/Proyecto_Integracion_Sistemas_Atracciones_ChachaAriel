@@ -6,20 +6,20 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { IntegracionBookingService } from "./integracion-booking.service";
+import { DisponibilidadAppService } from "./disponibilidad-app.service";
 import { DisponibilidadQueryDto } from "./dto/booking-reserva.dto";
 
 // Público según el contrato (security: []), igual que el catálogo.
 @ApiTags("Integración Booking (v3)")
 @Controller({ path: "atracciones", version: "3" })
 export class DisponibilidadController {
-  constructor(private readonly service: IntegracionBookingService) {}
+  constructor(private readonly service: DisponibilidadAppService) {}
 
   @Get(":id/disponibilidad")
   @ApiOperation({
     summary: "Turnos horarios y cupos disponibles para una fecha",
     description:
-      "El aforo es diario y lo comparten los turnos: reservar en uno descuenta en todos. " +
+      "Cada turno tiene su propio cupo; total_available_slots es la suma de los turnos. " +
       "Estados: DISPONIBLE, ULTIMOS_CUPOS (3 o menos) y AGOTADO.",
   })
   @ApiParam({ name: "id", description: "UUID de la atracción" })

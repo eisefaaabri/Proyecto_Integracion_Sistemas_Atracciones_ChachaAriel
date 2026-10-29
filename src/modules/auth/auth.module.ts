@@ -3,15 +3,15 @@ import { PassportModule } from "@nestjs/passport";
 import { JwtModule } from "@nestjs/jwt";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { JwtStrategy } from "./jwt.strategy";
-import { TypeOrmModule } from "@nestjs/typeorm";
-import { Usuario } from "./entities/usuario.entity";
-import { Cliente } from "../atracciones/entities/cliente.entity";
+import { IdentityModule } from "../identity/identity.module";
+import { BillingProfileModule } from "../billing-profile/billing-profile.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Usuario, Cliente]),
+    IdentityModule,
+    BillingProfileModule,
     PassportModule.register({ defaultStrategy: "jwt" }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -9,7 +9,7 @@ import {
   MaxLength,
   MinLength,
 } from "class-validator";
-import { RolUsuario } from "../entities/usuario.entity";
+import { RolUsuario } from "../rol-usuario.enum";
 
 export class CreateUserDto {
   @ApiProperty({ example: "admin.soporte@ecuatravel.com" })

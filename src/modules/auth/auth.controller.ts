@@ -1,11 +1,21 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Get, Patch, Param } from "@nestjs/common";
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+  Get,
+  Patch,
+  Param,
+} from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import { ThrottlerGuard, Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { Roles } from "./roles.decorator";
 import { RolesGuard } from "./roles.guard";
 import { JwtAuthGuard } from "./jwt-auth.guard";
-import { RolUsuario } from "./entities/usuario.entity";
+import { RolUsuario } from "./rol-usuario.enum";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
@@ -19,9 +29,17 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @ApiOperation({ summary: "Registrar una cuenta (rol TURISTA) y obtener un JWT" })
-  @ApiResponse({ status: 201, description: "Cuenta creada. Devuelve access_token + user." })
-  @ApiResponse({ status: 409, description: "El email o DNI ya están registrados" })
+  @ApiOperation({
+    summary: "Registrar una cuenta (rol TURISTA) y obtener un JWT",
+  })
+  @ApiResponse({
+    status: 201,
+    description: "Cuenta creada. Devuelve access_token + user.",
+  })
+  @ApiResponse({
+    status: 409,
+    description: "El email o DNI ya están registrados",
+  })
   register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
@@ -33,7 +51,10 @@ export class AuthController {
   @ApiOperation({ summary: "Inicia sesión y obtiene un JWT válido (UUID v4)" })
   @ApiResponse({ status: 200, description: "Login exitoso" })
   @ApiResponse({ status: 401, description: "Credenciales inválidas" })
-  @ApiResponse({ status: 429, description: "Demasiados intentos de login, espera 1 minuto" })
+  @ApiResponse({
+    status: 429,
+    description: "Demasiados intentos de login, espera 1 minuto",
+  })
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }
@@ -42,7 +63,9 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("ADMIN")
-  @ApiOperation({ summary: "Crear un nuevo usuario con rol asignado (solo ADMIN)" })
+  @ApiOperation({
+    summary: "Crear un nuevo usuario con rol asignado (solo ADMIN)",
+  })
   @ApiResponse({ status: 201, description: "Usuario creado con éxito" })
   @ApiResponse({ status: 409, description: "Email o DNI ya registrado" })
   async createUser(@Body() createUserDto: CreateUserDto) {
