@@ -24,6 +24,8 @@ import { DetailsRequestDto } from "./dto/details-request.dto";
 import { AvailabilityResponseDto } from "./dto/availability.dto";
 import { BOOKABLE_STATES, HORARIOS_TURNO } from "./reservas.constants";
 import { IntegracionBookingService } from "./integracion-booking.service";
+import { OutboxService } from "./outbox.service";
+import { TipoEventoOutbox } from "./entities/outbox-evento.entity";
 import {
   ReservationRequestDto,
   ReservationResponseDto,
@@ -61,6 +63,7 @@ export class AtraccionesService {
     @InjectRepository(DetalleReserva)
     private detalleReservaRepository: Repository<DetalleReserva>,
     private readonly integracionBooking: IntegracionBookingService,
+    private readonly outbox: OutboxService,
   ) {}
 
   // ==========================================
@@ -303,6 +306,21 @@ export class AtraccionesService {
       });
       await queryRunner.manager.save(factura);
 
+      await this.outbox.registrarCambioReserva(
+        queryRunner.manager,
+        TipoEventoOutbox.RESERVA_CREADA,
+        {
+          reservaId: reserva.id,
+          codigo: null,
+          canal: reserva.canal ?? "WEB",
+          atraccionId: id,
+          fecha: dto.date,
+          hora: null,
+          boletos: dto.ticket_count,
+          total,
+        },
+      );
+
       await queryRunner.commitTransaction();
       void this.integracionBooking.notificarStock(id, dto.date);
 
@@ -399,8 +417,28 @@ async getReservationById(id: string, usuarioId: string) {
     }
     if (reserva.estado_reserva !== EstadoReserva.CANCELADA) {
       reserva.estado_reserva = EstadoReserva.CANCELADA;
-      await this.reservaRepository.save(reserva);
-      const atraccionId = reserva.detalles?.[0]?.atraccion?.id;
+      const detalle = reserva.detalles?.[0];
+      await this.reservaRepository.manager.transaction(async (manager) => {
+        await manager.save(reserva);
+        if (detalle?.atraccion) {
+          await this.outbox.registrarCambioReserva(
+            manager,
+            TipoEventoOutbox.RESERVA_CANCELADA,
+            {
+              reservaId: reserva.id,
+              codigo: reserva.codigo_reserva ?? null,
+              canal: reserva.canal ?? "WEB",
+              atraccionId: detalle.atraccion.id,
+              fecha: String(reserva.fecha_reserva).slice(0, 10),
+              hora: reserva.hora_turno ?? null,
+              boletos: detalle.cantidad_boletos,
+              total: Number(detalle.subtotal),
+              extra: { cancellation_reason: dto?.reason ?? null },
+            },
+          );
+        }
+      });
+      const atraccionId = detalle?.atraccion?.id;
       if (atraccionId) {
         void this.integracionBooking.notificarStock(
           atraccionId,
@@ -633,6 +671,28 @@ async getReservationById(id: string, usuarioId: string) {
 
       await queryRunner.manager.save(factura);
       await queryRunner.manager.save(locked);
+
+      const detalle = await queryRunner.manager.findOne(DetalleReserva, {
+        where: { reserva: { id: reservationId } },
+        relations: ["atraccion"],
+      });
+      if (detalle?.atraccion) {
+        await this.outbox.registrarCambioReserva(
+          queryRunner.manager,
+          TipoEventoOutbox.RESERVA_CONFIRMADA,
+          {
+            reservaId: locked.id,
+            codigo: locked.codigo_reserva ?? null,
+            canal: locked.canal ?? "WEB",
+            atraccionId: detalle.atraccion.id,
+            fecha: String(locked.fecha_reserva).slice(0, 10),
+            hora: locked.hora_turno ?? null,
+            boletos: detalle.cantidad_boletos,
+            total: Number(detalle.subtotal),
+            extra: { payment_method: method },
+          },
+        );
+      }
 
       await queryRunner.commitTransaction();
 

@@ -20,7 +20,10 @@ import {
   Pasajeros,
   Reserva,
 } from "./entities/reserva.entity";
-import { BOOKABLE_STATES, HORARIOS_TURNO } from "./reservas.constants";
+import { HORARIOS_TURNO } from "./reservas.constants";
+import { contarBoletosOcupados } from "./aforo.util";
+import { OutboxService } from "./outbox.service";
+import { TipoEventoOutbox } from "./entities/outbox-evento.entity";
 import { InventarioBookingClient } from "./inventario-booking.client";
 import { hoyEcuador, problem } from "./booking.utils";
 import {
@@ -145,6 +148,7 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly inventario: InventarioBookingClient,
+    private readonly outbox: OutboxService,
     config: ConfigService,
   ) {
     this.diasSincronizacion = Number(
@@ -199,7 +203,7 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         );
       }
 
-      const ocupados = await this.boletosOcupados(
+      const ocupados = await contarBoletosOcupados(
         manager,
         atraccion.id,
         datos.fecha,
@@ -269,6 +273,22 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         cliente,
       });
       await manager.save(factura);
+
+      await this.outbox.registrarCambioReserva(
+        manager,
+        TipoEventoOutbox.RESERVA_CONFIRMADA,
+        {
+          reservaId: reserva.id,
+          codigo: reserva.codigo_reserva,
+          canal: CanalReserva.BOOKING,
+          atraccionId: atraccion.id,
+          fecha: datos.fecha,
+          hora: datos.hora,
+          boletos: datos.totalBoletos,
+          total,
+          extra: { booking_reservation_id: datos.bookingReservationId },
+        },
+      );
 
       await queryRunner.commitTransaction();
       void this.notificarStock(atraccion.id, datos.fecha, correlationId);
@@ -344,7 +364,7 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
     }
 
     const hoy = hoyEcuador();
-    const ocupados = await this.boletosOcupados(
+    const ocupados = await contarBoletosOcupados(
       this.dataSource.manager,
       atraccion.id,
       fecha,
@@ -444,6 +464,28 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
           { reserva: { id: reserva.id } },
           { estado_pago: EstadoPago.REEMBOLSADO },
         );
+        const detalle = reserva.detalles?.[0];
+        if (detalle?.atraccion) {
+          await this.outbox.registrarCambioReserva(
+            manager,
+            TipoEventoOutbox.RESERVA_CANCELADA,
+            {
+              reservaId: reserva.id,
+              codigo: reserva.codigo_reserva,
+              canal: reserva.canal,
+              atraccionId: detalle.atraccion.id,
+              fecha: String(reserva.fecha_reserva).slice(0, 10),
+              hora: reserva.hora_turno,
+              boletos: detalle.cantidad_boletos,
+              total: Number(detalle.subtotal),
+              extra: {
+                booking_reservation_id: reserva.booking_reservation_id,
+                cancellation_reason: reserva.cancelacion_motivo,
+                requested_by: reserva.cancelacion_solicitante,
+              },
+            },
+          );
+        }
 
         this.log("reserva.booking.cancelada", correlationId, {
           reservation_id: reserva.id,
@@ -808,24 +850,6 @@ export class IntegracionBookingService implements OnApplicationBootstrap {
         "No se pudo procesar la solicitud",
       );
     }
-  }
-
-  private async boletosOcupados(
-    manager: EntityManager,
-    atraccionId: string,
-    fecha: string,
-  ): Promise<number> {
-    const row = await manager
-      .createQueryBuilder(DetalleReserva, "d")
-      .innerJoin("d.reserva", "r")
-      .select("COALESCE(SUM(d.cantidad_boletos), 0)", "sum")
-      .where("d.atraccion_id = :atraccionId", { atraccionId })
-      .andWhere("r.fecha_reserva = :fecha", { fecha })
-      .andWhere("r.estado_reserva IN (:...estados)", {
-        estados: BOOKABLE_STATES,
-      })
-      .getRawOne();
-    return Number(row?.sum ?? 0);
   }
 
   // El turista de Booking no tiene cuenta local: se identifica por documento.
