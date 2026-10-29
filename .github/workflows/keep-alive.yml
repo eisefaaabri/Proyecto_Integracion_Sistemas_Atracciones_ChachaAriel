@@ -1,0 +1,23 @@
+# Respaldo para que Supabase (plan gratuito) no se pause por inactividad: el
+# health de la API consulta la base. Requiere la variable de repositorio
+# HEALTH_URL (Settings → Secrets and variables → Actions → Variables), por ejemplo
+# https://<app>.azurewebsites.net/api/v3/atracciones/health
+name: Keep-alive Supabase
+
+on:
+  schedule:
+    - cron: "17 11 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.HEALTH_URL != '' }}
+    steps:
+      - name: Health check (consulta la base)
+        env:
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+        run: |
+          code=$(curl -s -o respuesta.json -w '%{http_code}' --max-time 30 "$HEALTH_URL")
+          cat respuesta.json; echo
+          test "$code" = "200"

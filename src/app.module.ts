@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { ThrottlerModule } from "@nestjs/throttler";
 
 import { CommonModule } from "./common/common.module";
+import { buildTypeOrmOptions } from "./config/database.config";
 import { AtraccionesModule } from "./modules/atracciones/atracciones.module";
 import { AuthModule } from "./modules/auth/auth.module";
 
@@ -17,14 +18,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: "postgres",
-        url: configService.get<string>("DATABASE_URL"),
-        autoLoadEntities: true,
-        synchronize: configService.get<string>("DB_SYNCHRONIZE") === "true",
-        migrationsRun: true,
-        migrations: [__dirname + "/migrations/*{.ts,.js}"],
-      }),
+      useFactory: buildTypeOrmOptions,
     }),
 
     CommonModule,

@@ -12,6 +12,7 @@ import { ContratoPromociones } from "./entities/contrato-promociones.entity";
 import { OutboxEvento } from "./entities/outbox-evento.entity";
 import { OutboxService } from "./outbox.service";
 import { EventosController } from "./eventos.controller";
+import { HealthController } from "./health.controller";
 import { IntegracionBookingService } from "./integracion-booking.service";
 import { ApiKeyGuard } from "../../common/guards/api-key.guard";
 import { Atraccion } from "./entities/atraccion.entity";
@@ -42,6 +43,7 @@ import { RolesGuard } from "../auth/roles.guard";
   ],
   // CatalogoBookingController va primero: ver comentario en el controlador.
   controllers: [
+    HealthController,
     CatalogoBookingController,
     EventosController,
     AtraccionesController,

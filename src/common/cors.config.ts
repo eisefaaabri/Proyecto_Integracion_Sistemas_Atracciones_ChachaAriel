@@ -31,7 +31,7 @@ const BASE: CorsOptions = {
 
 // El healthcheck es público y de solo lectura: el tablero de Booking puede
 // consultarlo desde el navegador sin estar en la lista.
-const HEALTH_PATH = /^\/api\/v\d+\/atracciones\/health\/?(\?|$)/;
+const HEALTH_PATH = /^\/api\/v\d+\/(atracciones\/)?health\/?(\?|$)/;
 
 function normalizar(origen: string): string {
   return origen.trim().replace(/\/+$/, "").toLowerCase();
