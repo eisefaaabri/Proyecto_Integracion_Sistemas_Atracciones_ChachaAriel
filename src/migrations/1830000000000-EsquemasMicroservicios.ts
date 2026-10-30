@@ -2,7 +2,7 @@ import { MigrationInterface, QueryRunner } from "typeorm";
 
 /**
  * Modelo por microservicios basado en el diseño de Descubre EC
- * (Adaptacion_Microservicios/02_microservicios_v2_bases_de_datos.sql), adaptado a Ecuatravel.
+ * (database/02_microservicios_v2_bases_de_datos.sql), adaptado a Ecuatravel.
  *
  * Cada servicio vive en su propio esquema (equivalente a database-per-service dentro de una
  * sola base de Supabase). Solo hay FK dentro de un esquema; las referencias a otro servicio son
