@@ -42,8 +42,6 @@ lerna-debug.log*
 /FRONT-END-IS/
 
 # Scripts locales de pruebas y seeding
-create_admin.js
-parse.js
 seed-*.js
 smoke-test.mjs
 test-*.js
