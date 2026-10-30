@@ -251,15 +251,17 @@ export class AtraccionesService {
     const atr = await this.atraccionOFallo(id);
     const turnos = await this.inventory.cuposDelDia(atr.atr_id, date);
     if (!ESTADOS_RESERVABLES.includes(atr.atr_estado)) {
-      return { date, available_spots: 0, times: [] };
+      return { date, available_spots: 0, times: [], slots: [] };
     }
-    const libres = turnos.map((t) =>
-      t.cerrada ? 0 : Math.max(t.total - t.reservado, 0),
-    );
+    const slots = turnos.map((t) => ({
+      time: t.hora,
+      available_spots: t.cerrada ? 0 : Math.max(t.total - t.reservado, 0),
+    }));
     return {
       date,
-      available_spots: libres.length ? Math.max(...libres) : 0,
-      times: turnos.map((t) => t.hora),
+      available_spots: Math.max(0, ...slots.map((s) => s.available_spots)),
+      times: slots.map((s) => s.time),
+      slots,
     };
   }
 
@@ -278,6 +280,7 @@ export class AtraccionesService {
       total_price: { currency: "USD", total: v.reserva.res_subtotal },
       atraccion_id: v.atraccion?.atr_uuid ?? null,
       date: v.turno?.fecha,
+      time: v.turno?.hora,
       customer_name:
         nombreCliente ?? this.bookings.titular(v.reserva)?.pax_nombre,
     };
@@ -332,7 +335,7 @@ export class AtraccionesService {
         }
         atrUuid = atraccion.atr_uuid;
 
-        // Turno pedido o, si no se indica, el primero con cupo suficiente.
+        // Turno pedido (sin cambiarlo por otro) o, si no se indica, el primero con cupo.
         const turnos = await this.inventory.cuposDelDia(
           atraccion.atr_id,
           fecha,
@@ -341,10 +344,20 @@ export class AtraccionesService {
         const hora = dto.time ? toHora24(dto.time) : null;
         const libres = (t: (typeof turnos)[number]) =>
           t.cerrada ? 0 : t.total - t.reservado;
-        const turno =
-          turnos.find(
-            (t) => t.hora === hora && libres(t) >= dto.ticket_count,
-          ) ?? turnos.find((t) => libres(t) >= dto.ticket_count);
+        if (dto.time && !turnos.some((t) => t.hora === hora)) {
+          throw new BadRequestException(
+            `La atracción no tiene un turno a las ${dto.time}`,
+          );
+        }
+        const turno = turnos.find(
+          (t) => (!hora || t.hora === hora) && libres(t) >= dto.ticket_count,
+        );
+        if (!turno && hora) {
+          const elegido = turnos.find((t) => t.hora === hora);
+          throw new ConflictException(
+            `No hay cupos suficientes para ${fecha} a las ${hora}: quedan ${Math.max(0, libres(elegido))} de ${elegido.total}`,
+          );
+        }
         if (!turno) {
           const maximo = Math.max(0, ...turnos.map(libres));
           const cupo = Math.max(0, ...turnos.map((t) => t.total));
@@ -417,7 +430,11 @@ export class AtraccionesService {
       void this.disponibilidad.notificarStock(atrUuid, fecha);
       return resultado.respuesta;
     } catch (err) {
-      if (err instanceof NotFoundException || err instanceof ConflictException)
+      if (
+        err instanceof NotFoundException ||
+        err instanceof ConflictException ||
+        err instanceof BadRequestException
+      )
         throw err;
       if (err instanceof SinCupoError) {
         throw new ConflictException(
