@@ -1,0 +1,52 @@
+# Despliega el backend en Azure App Service (Linux, Node 22) en cada push a main.
+# Requiere el secreto AZURE_WEBAPP_PUBLISH_PROFILE (perfil de publicación de la app).
+name: Deploy Azure App Service
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: ecuatravel-atracciones-api
+  NODE_VERSION: "22"
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar y compilar
+        run: |
+          npm ci
+          npm run build
+
+      # Solo dependencias de producción, compiladas en Linux (bcrypt es nativo).
+      - name: Empaquetar
+        run: |
+          npm prune --omit=dev
+          zip -qr release.zip dist node_modules package.json package-lock.json
+
+      - name: Sin perfil de publicación
+        if: env.PUBLISH_PROFILE == ''
+        run: echo "::warning::Falta el secreto AZURE_WEBAPP_PUBLISH_PROFILE; no se despliega."
+
+      - name: Desplegar en Azure
+        if: env.PUBLISH_PROFILE != ''
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ env.PUBLISH_PROFILE }}
+          package: release.zip

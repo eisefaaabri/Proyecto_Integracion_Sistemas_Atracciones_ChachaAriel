@@ -26,8 +26,10 @@ type Canal = "grpc" | "rest";
 const PROTO_PATH = join(__dirname, "..", "..", "proto", "inventory.proto");
 const DEADLINE_MS = 5000;
 
-// Envía el stock a Booking por gRPC (PushStockUpdate) o por REST
-// (POST {BOOKING_HUB_REST_URL}/inventory/stock). Sin destino configurado no hace nada.
+// Envía el stock a Booking por gRPC (PushStockUpdate) o por REST. Destinos:
+//  - REST: BOOKING_REST_STOCK_URL (URL completa) o BOOKING_HUB_REST_URL (base + /inventory/stock)
+//  - gRPC: BOOKING_GRPC_URL (host:puerto) o BOOKING_HUB_GRPC_HOST + BOOKING_HUB_GRPC_PORT
+// Sin destino configurado no hace nada.
 @Injectable()
 export class InventarioBookingClient implements OnModuleDestroy {
   private readonly logger = new Logger(InventarioBookingClient.name);
@@ -47,25 +49,33 @@ export class InventarioBookingClient implements OnModuleDestroy {
       undefined;
 
     const restBase = config.get<string>("BOOKING_HUB_REST_URL");
-    const grpcHost = config.get<string>("BOOKING_HUB_GRPC_HOST");
+    const restUrl =
+      config.get<string>("BOOKING_REST_STOCK_URL") ||
+      (restBase ? `${restBase.replace(/\/+$/, "")}/inventory/stock` : null);
+    const grpcUrl = config.get<string>("BOOKING_GRPC_URL");
+    const grpcHost = grpcUrl
+      ? grpcUrl.replace(/:\d+$/, "")
+      : config.get<string>("BOOKING_HUB_GRPC_HOST");
     const preferido = config.get<string>("BOOKING_STOCK_TRANSPORT");
     const canal: Canal | null =
       preferido === "rest" || preferido === "grpc"
         ? preferido
-        : restBase
+        : restUrl
           ? "rest"
           : grpcHost
             ? "grpc"
             : null;
 
-    if (canal === "rest" && restBase) {
-      this.restUrl = `${restBase.replace(/\/+$/, "")}/inventory/stock`;
+    if (canal === "rest" && restUrl) {
+      this.restUrl = restUrl;
       this.canal = "rest";
       this.logger.log(
         `Stock por REST hacia ${this.restUrl} (${this.serviceId})`,
       );
     } else if (canal === "grpc" && grpcHost) {
-      const port = config.get<string>("BOOKING_HUB_GRPC_PORT", "50051");
+      const port =
+        grpcUrl?.match(/:(\d+)$/)?.[1] ??
+        config.get<string>("BOOKING_HUB_GRPC_PORT", "50051");
       const tls = config.get<string>("BOOKING_HUB_GRPC_TLS") === "true";
       const definition = protoLoader.loadSync(PROTO_PATH, {
         keepCase: true,
@@ -83,7 +93,7 @@ export class InventarioBookingClient implements OnModuleDestroy {
       );
     } else {
       this.logger.warn(
-        "Sin BOOKING_HUB_REST_URL ni BOOKING_HUB_GRPC_HOST: no se enviará stock a Booking.",
+        "Sin destino REST ni gRPC de Booking configurado: no se enviará stock.",
       );
       return;
     }
@@ -125,7 +135,7 @@ export class InventarioBookingClient implements OnModuleDestroy {
     });
   }
 
-  // El endpoint REST de Booking documenta solo estos campos.
+  // Campos del endpoint REST de Booking (guía de Paul + instructivo de Azure).
   private async enviarRest(msg: StockUpdateMessage): Promise<StockUpdateAck> {
     const res = await fetch(this.restUrl, {
       method: "POST",
@@ -139,6 +149,7 @@ export class InventarioBookingClient implements OnModuleDestroy {
         date: msg.date,
         time_slot: msg.time_slot,
         available_units: msg.available_units,
+        timestamp: msg.timestamp,
       }),
       signal: AbortSignal.timeout(DEADLINE_MS),
     });
