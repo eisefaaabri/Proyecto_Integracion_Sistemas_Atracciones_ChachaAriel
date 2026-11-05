@@ -2,6 +2,10 @@ import { Module } from "@nestjs/common";
 import { AtraccionesService } from "./atracciones.service";
 import { AtraccionesController } from "./atracciones.controller";
 import { IntegracionBookingController } from "./integracion-booking.controller";
+import { ClientesController } from "./clientes.controller";
+import { ClientesAppService } from "./clientes-app.service";
+import { AdminReservasController } from "./admin-reservas.controller";
+import { BookingCentralClient } from "./booking-central.client";
 import { DisponibilidadController } from "./disponibilidad.controller";
 import { InventarioBookingClient } from "./inventario-booking.client";
 import { CatalogoBookingController } from "./catalogo-booking.controller";
@@ -55,6 +59,8 @@ import { InvoicingModule } from "../invoicing/invoicing.module";
     AtraccionesController,
     IntegracionBookingController,
     DisponibilidadController,
+    ClientesController,
+    AdminReservasController,
   ],
   providers: [
     AtraccionesService,
@@ -64,6 +70,8 @@ import { InvoicingModule } from "../invoicing/invoicing.module";
     InventarioBookingClient,
     CatalogoBookingService,
     OutboxService,
+    ClientesAppService,
+    BookingCentralClient,
     RolesGuard,
     ApiKeyGuard,
   ],

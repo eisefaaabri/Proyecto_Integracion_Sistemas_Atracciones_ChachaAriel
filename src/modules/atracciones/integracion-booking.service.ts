@@ -19,6 +19,11 @@ import { CodigoEstadoReserva, Reserva } from "../booking/booking.entities";
 import { PaymentService } from "../payment/payment.service";
 import { CONSUMIDOR_FINAL } from "../billing-profile/billing-profile.service";
 import { DisponibilidadAppService } from "./disponibilidad-app.service";
+import { ClientesAppService } from "./clientes-app.service";
+import {
+  BookingCentralClient,
+  ResultadoNotificacion,
+} from "./booking-central.client";
 import {
   ReservaUsadaError,
   ReservasAppService,
@@ -71,6 +76,13 @@ interface ReservaNormalizada {
   metodoPago: string | null;
   solicitudes: string | null;
   bookingReservationId: string | null;
+  clientId: string | null;
+}
+
+export interface OpcionesCheckin {
+  // La web (guía o administrador) puede registrar reservas de cualquier canal.
+  cualquierCanal?: boolean;
+  adminId?: string | null;
 }
 
 function igualSeguro(a: string, b: string): boolean {
@@ -125,6 +137,8 @@ export class IntegracionBookingService {
     private readonly payments: PaymentService,
     private readonly reservas: ReservasAppService,
     private readonly disponibilidad: DisponibilidadAppService,
+    private readonly clientes: ClientesAppService,
+    private readonly bookingCentral: BookingCentralClient,
     config: ConfigService,
   ) {
     const secret =
@@ -206,6 +220,11 @@ export class IntegracionBookingService {
           throw this.sinCupo(atraccion.atr_nombre, datos, 0);
         }
 
+        const usuId = await this.clientes.resolverUsuId(
+          datos.clientId,
+          datos.email,
+          manager,
+        );
         const vista = await this.reservas
           .crear(
             {
@@ -214,7 +233,7 @@ export class IntegracionBookingService {
               horId: turno.horId,
               pasajeros: datos.pasajeros,
               canal: CanalOrden.BOOKING,
-              usuId: null,
+              usuId,
               titular: { nombre: datos.nombre, documento: datos.documento },
               contacto: { correo: datos.email, telefono: datos.telefono },
               comprador: {
@@ -256,6 +275,7 @@ export class IntegracionBookingService {
           time: datos.hora,
           tickets: datos.totalBoletos,
           booking_reservation_id: datos.bookingReservationId,
+          cliente_enlazado: usuId !== null,
         });
         return { cuerpo };
       });
@@ -369,12 +389,19 @@ export class IntegracionBookingService {
     dto: CheckinBookingReservaDto,
     idempotencyKey: string,
     correlationId: string,
+    opciones: OpcionesCheckin = {},
   ) {
-    return this.enTransaccion(
+    let nuevo: VistaReserva | null = null;
+    const pase = await this.enTransaccion(
       "reserva.booking.checkin",
       correlationId,
       async (manager) => {
-        const vista = await this.buscarReserva(manager, id, true);
+        const vista = await this.buscarReserva(
+          manager,
+          id,
+          true,
+          opciones.cualquierCanal,
+        );
         if (!vista) throw reservaNoEncontrada(id);
         const { reserva } = vista;
 
@@ -412,6 +439,15 @@ export class IntegracionBookingService {
             "El código QR presentado no corresponde a esta reserva.",
           );
         }
+        if (dto.asistentes_reales > reserva.res_numero_tickets) {
+          throw problem(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "ATTENDEES_EXCEED_TICKETS",
+            "asistentes-exceden-boletos",
+            "Asistentes mayores que los boletos",
+            `La reserva ${reserva.res_codigo} tiene ${reserva.res_numero_tickets} boletos.`,
+          );
+        }
         if (reserva.res_checkin_en) {
           // Reintento del mismo escaneo: se devuelve el pase ya emitido.
           if (reserva.res_checkin_idempotencia === idempotencyKey)
@@ -433,7 +469,10 @@ export class IntegracionBookingService {
             ),
             res_checkin_en: new Date(),
             res_checkin_guia:
-              dto.guia_asignado?.trim() || dto.guia_codigo?.trim() || null,
+              dto.guia_asignado?.trim() ||
+              dto.guia_codigo?.trim() ||
+              opciones.adminId ||
+              null,
             res_checkin_dispositivo: dto.scanner_device_id?.trim() || null,
             res_checkin_idempotencia: idempotencyKey,
           },
@@ -445,9 +484,50 @@ export class IntegracionBookingService {
           reservation_code: reserva.res_codigo,
           guia: actual.reserva.res_checkin_guia,
           dispositivo: actual.reserva.res_checkin_dispositivo,
+          canal: actual.orden.ord_canal,
         });
+        nuevo = actual;
         return this.toCheckinResponse(actual);
       },
+    );
+    // Después del commit: solo un check-in nuevo de una reserva de Booking se notifica.
+    if (!nuevo || nuevo.orden.ord_canal !== CanalOrden.BOOKING) return pase;
+    const notificacion = await this.notificarCheckin(
+      nuevo,
+      dto,
+      opciones,
+      correlationId,
+    );
+    return { ...pase, booking_notificacion: notificacion };
+  }
+
+  private async notificarCheckin(
+    v: VistaReserva,
+    dto: CheckinBookingReservaDto,
+    opciones: OpcionesCheckin,
+    correlationId: string,
+  ): Promise<ResultadoNotificacion> {
+    const validadoCon = dto.codigo_voucher_qr
+      ? "código QR y documento de identidad"
+      : "documento de identidad";
+    return this.bookingCentral.notificarCheckin(
+      {
+        external_order_id: v.orden.ord_numero,
+        client_id: await this.clientes.clientIdDeOrden(v.orden),
+        estado: "CONFIRMADO_ASISTIDO",
+        asistentes_reales:
+          dto.asistentes_reales ?? v.reserva.res_numero_tickets,
+        admin_id:
+          opciones.adminId ||
+          dto.guia_codigo?.trim() ||
+          dto.guia_asignado?.trim() ||
+          "guia-turistico",
+        fecha_checkin: v.reserva.res_checkin_en.toISOString(),
+        observaciones:
+          dto.observaciones?.trim() ||
+          `Turista validado en punto de encuentro con ${validadoCon}`,
+      },
+      correlationId,
     );
   }
 
@@ -573,6 +653,7 @@ export class IntegracionBookingService {
       metodoPago: dto.payment_method?.method ?? null,
       solicitudes: dto.special_requirements?.trim() || null,
       bookingReservationId: dto.booking_reservation_id ?? null,
+      clientId: dto.client_id ?? dto.cliente_id ?? null,
     };
   }
 
@@ -587,6 +668,7 @@ export class IntegracionBookingService {
     manager: EntityManager,
     id: string,
     bloquear = false,
+    cualquierCanal = false,
   ): Promise<VistaReserva | null> {
     const valor = id.trim();
     let reserva: Reserva | null = null;
@@ -605,7 +687,9 @@ export class IntegracionBookingService {
     if (bloquear)
       reserva = await this.bookings.bloquear(reserva.res_id, manager);
     const vista = await this.reservas.vista(reserva, manager);
-    return vista.orden?.ord_canal === CanalOrden.BOOKING ? vista : null;
+    return cualquierCanal || vista.orden?.ord_canal === CanalOrden.BOOKING
+      ? vista
+      : null;
   }
 
   private async enTransaccion<T>(

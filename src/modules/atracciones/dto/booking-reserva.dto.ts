@@ -215,6 +215,22 @@ export class CreateBookingReservaDto {
   booking_reservation_id?: string;
 
   @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "client_id devuelto por /api/v3/clientes; enlaza la reserva al turista",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  client_id?: string;
+
+  @ApiPropertyOptional({ description: "Alias de client_id" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  cliente_id?: string;
+
+  @ApiPropertyOptional({
     description: "Se prefiere la cabecera X-Correlation-Id",
   })
   @IsOptional()
@@ -286,6 +302,24 @@ export class CheckinBookingReservaDto {
   @IsString()
   @MaxLength(100)
   scanner_device_id?: string;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    description:
+      "Personas que llegaron; por defecto, los boletos de la reserva",
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  asistentes_reales?: number;
+
+  @ApiPropertyOptional({ example: "Turista validado con cédula física" })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  observaciones?: string;
 }
 
 export class DisponibilidadQueryDto {

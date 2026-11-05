@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { EntityManager, Repository } from "typeorm";
+import { Brackets, EntityManager, Repository } from "typeorm";
 import { Rol, Usuario, UsuarioRol } from "./identity.entities";
 
 export type NombreRol = "ADMIN" | "OPERADOR" | "CLIENTE";
@@ -84,6 +84,31 @@ export class IdentityService {
       .leftJoinAndSelect("ur.rol", "r")
       .where("u.usu_correo = :correo", { correo })
       .getOne();
+  }
+
+  // Coincidencias por correo o documento (como mucho dos usuarios distintos).
+  buscarPorCorreoODocumento(
+    correo: string | null,
+    documento: string | null,
+    manager?: EntityManager,
+  ): Promise<Usuario[]> {
+    if (!correo && !documento) return Promise.resolve([]);
+    // El registro web no normaliza el correo: se compara sin mayúsculas.
+    return (manager ?? this.usuarios.manager)
+      .createQueryBuilder(Usuario, "u")
+      .where(
+        new Brackets((qb) => {
+          if (correo)
+            qb.orWhere("lower(u.usu_correo) = :correo", {
+              correo: correo.toLowerCase(),
+            });
+          if (documento)
+            qb.orWhere("u.usu_documento = :documento", {
+              documento: documento.toUpperCase(),
+            });
+        }),
+      )
+      .getMany();
   }
 
   async existeCorreo(

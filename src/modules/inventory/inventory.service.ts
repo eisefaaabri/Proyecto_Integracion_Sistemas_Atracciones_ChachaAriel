@@ -77,6 +77,14 @@ export class InventoryService {
   }
 
   // Cupo por turno activo de una fecha. Si la fecha está bloqueada, todos quedan cerrados.
+  async idsDeFecha(fecha: string): Promise<number[]> {
+    const filas = await this.disponibilidades.find({
+      select: { dis_id: true },
+      where: { dis_fecha: fecha },
+    });
+    return filas.map((d) => d.dis_id);
+  }
+
   async cuposDelDia(
     atrId: number,
     fecha: string,

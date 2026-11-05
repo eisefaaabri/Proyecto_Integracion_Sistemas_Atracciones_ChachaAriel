@@ -507,6 +507,11 @@ export class AtraccionesService {
         "cancelar",
         m,
       );
+      if (vista.orden.ord_canal === CanalOrden.BOOKING) {
+        throw new ConflictException(
+          "Esta reserva se hizo en Booking; cancélala desde Booking",
+        );
+      }
       await this.bookings.bloquear(vista.reserva.res_id, m);
       try {
         if (

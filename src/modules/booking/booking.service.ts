@@ -130,6 +130,15 @@ export class BookingService {
     });
   }
 
+  porDisponibilidades(disIds: number[]): Promise<Reserva[]> {
+    if (!disIds.length) return Promise.resolve([]);
+    return this.reservas.find({
+      where: { dis_id: In([...new Set(disIds)]) },
+      relations: { estado: true, pasajeros: true },
+      order: { res_creado_en: "ASC" },
+    });
+  }
+
   // FOR UPDATE no admite LEFT JOIN en PostgreSQL: se bloquea la fila sola y luego se recarga.
   async bloquear(
     resId: number,
