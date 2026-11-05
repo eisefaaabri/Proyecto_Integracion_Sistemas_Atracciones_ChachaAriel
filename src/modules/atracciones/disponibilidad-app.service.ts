@@ -5,6 +5,7 @@ import {
   OnApplicationBootstrap,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { evento } from "../../common/logging/evento";
 import { CatalogService } from "../catalog/catalog.service";
 import { Atraccion, EstadoAtraccion } from "../catalog/catalog.entities";
 import { InventoryService } from "../inventory/inventory.service";
@@ -204,6 +205,10 @@ export class DisponibilidadAppService implements OnApplicationBootstrap {
       );
       this.log("inventario.booking.push", correlationId, {
         canal: this.cliente.canal,
+        operacion:
+          this.cliente.canal === "grpc"
+            ? "gRPC PushStockUpdate"
+            : "REST POST /inventory/stock",
         attraction_id: atrUuid,
         date: fecha,
         slots: disponibilidad.time_slots.map((t, i) => ({
@@ -215,8 +220,7 @@ export class DisponibilidadAppService implements OnApplicationBootstrap {
       return true;
     } catch (err) {
       this.logger.warn(
-        JSON.stringify({
-          event: "inventario.booking.push_fallido",
+        evento("inventario.booking.push_fallido", {
           canal: this.cliente.canal,
           correlation_id: correlationId,
           attraction_id: atrUuid,
@@ -256,8 +260,6 @@ export class DisponibilidadAppService implements OnApplicationBootstrap {
   }
 
   private log(event: string, correlationId: string | undefined, data: object) {
-    this.logger.log(
-      JSON.stringify({ event, correlation_id: correlationId, ...data }),
-    );
+    this.logger.log(evento(event, { correlation_id: correlationId, ...data }));
   }
 }

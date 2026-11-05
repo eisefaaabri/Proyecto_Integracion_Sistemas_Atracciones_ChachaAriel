@@ -6,6 +6,7 @@ import { ConfigService } from "@nestjs/config";
 import helmet from "helmet";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { correlationIdMiddleware } from "./common/middleware/correlation-id.middleware";
+import { requestLoggerMiddleware } from "./common/middleware/request-logger.middleware";
 import { buildCorsOptions } from "./common/cors.config";
 
 async function bootstrap() {
@@ -17,6 +18,7 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   app.use(correlationIdMiddleware);
+  app.use(requestLoggerMiddleware);
 
   // 2. Helmet para cabeceras de seguridad permitiendo Swagger UI
   app.use(
@@ -63,7 +65,7 @@ async function bootstrap() {
           "Gestiona el catálogo de tours, disponibilidad de aforo en tiempo real y transacciones de reserva.\n\n" +
           "Endpoints de reserva exigen la cabecera `Idempotency-Key` (UUID v4) y propagan `X-Correlation-Id`.",
       )
-      .setVersion("3.2.0")
+      .setVersion("3.3.0")
       .addBearerAuth()
       .addApiKey(
         { type: "apiKey", in: "header", name: "X-API-Key" },

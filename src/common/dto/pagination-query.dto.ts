@@ -22,7 +22,8 @@ export class PaginationQueryDto {
   limit?: number = 10;
 
   @ApiPropertyOptional({
-    description: "Búsqueda por nombre, descripción o aeropuerto (case-insensitive)",
+    description:
+      "Búsqueda por nombre, descripción o aeropuerto (case-insensitive)",
     example: "Quito",
   })
   @IsOptional()

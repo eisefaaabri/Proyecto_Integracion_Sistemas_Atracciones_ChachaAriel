@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { evento } from "../../common/logging/evento";
 
 export interface CheckinBookingCentral {
   external_order_id: string;
@@ -124,10 +125,10 @@ export class BookingCentralClient {
     extra: object = {},
   ) {
     this.logger[nivel](
-      JSON.stringify({
-        event,
+      evento(event, {
         correlation_id: correlationId,
         external_order_id: datos.external_order_id,
+        url: `${this.baseUrl}/reservas/${datos.external_order_id}/checkin`,
         ...extra,
       }),
     );

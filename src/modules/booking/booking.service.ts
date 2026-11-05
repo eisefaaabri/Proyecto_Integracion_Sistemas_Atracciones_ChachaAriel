@@ -130,6 +130,20 @@ export class BookingService {
     });
   }
 
+  async porDocumentoTitular(documento: string): Promise<Reserva[]> {
+    const titulares = await this.reservas.manager.find(ReservaPasajero, {
+      select: { res_id: true },
+      where: { pax_documento: documento.toUpperCase(), pax_es_titular: true },
+      take: 50,
+    });
+    if (!titulares.length) return [];
+    return this.reservas.find({
+      where: { res_id: In(titulares.map((t) => t.res_id)) },
+      relations: { estado: true, pasajeros: true },
+      order: { res_creado_en: "DESC" },
+    });
+  }
+
   porDisponibilidades(disIds: number[]): Promise<Reserva[]> {
     if (!disIds.length) return Promise.resolve([]);
     return this.reservas.find({

@@ -159,6 +159,17 @@ export class OrderService {
     });
   }
 
+  // Órdenes del turista por su correo de contacto o por su cuenta (sin mayúsculas).
+  porCorreo(correo: string, usuIds: number[]): Promise<Orden[]> {
+    const qb = this.ordenes
+      .createQueryBuilder("o")
+      .where("lower(o.ord_contacto_correo) = :correo", {
+        correo: correo.toLowerCase(),
+      });
+    if (usuIds.length) qb.orWhere("o.usu_id IN (:...usuIds)", { usuIds });
+    return qb.orderBy("o.ord_creado_en", "DESC").take(50).getMany();
+  }
+
   porReferenciaExterna(referencia: string): Promise<Orden[]> {
     return this.ordenes.find({
       where: {

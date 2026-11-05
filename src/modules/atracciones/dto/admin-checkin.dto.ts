@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
   IsDateString,
@@ -19,18 +19,30 @@ export class AdminReservasQueryDto {
   @IsOptional()
   @IsDateString({ strict: true })
   fecha?: string;
+
+  @ApiPropertyOptional({
+    example: "ECT-7KQ2M9",
+    description:
+      "Código de reserva, cédula/pasaporte o email del turista (busca en todas las fechas)",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  q?: string;
 }
 
 export class AdminCheckinDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: "1724589633",
-    description: "Documento que presenta el turista",
+    description:
+      "Documento que presenta el turista; si se envía debe ser el del titular",
   })
+  @IsOptional()
   @Matches(/^[A-Za-z0-9]{5,20}$/, {
     message:
       "documento_identidad debe tener entre 5 y 20 caracteres alfanuméricos",
   })
-  documento_identidad: string;
+  documento_identidad?: string;
 
   @ApiPropertyOptional({
     description: "Código de reserva (ECT-XXXXXX) o contenido del QR",

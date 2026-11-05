@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource, EntityManager } from "typeorm";
 import { randomBytes } from "crypto";
@@ -7,6 +7,8 @@ import { Usuario } from "../identity/identity.entities";
 import { IdentityService, nombreCompleto } from "../identity/identity.service";
 import { Orden } from "../order/order.entities";
 import { UUID_REGEX, problem } from "./booking.utils";
+import { correoParcial, evento } from "../../common/logging/evento";
+import { currentCorrelationId } from "../../common/middleware/correlation-id.middleware";
 import {
   ClienteResponseDto,
   ClientesQueryDto,
@@ -30,6 +32,8 @@ function conflicto(detail: string) {
  */
 @Injectable()
 export class ClientesAppService {
+  private readonly logger = new Logger(ClientesAppService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly identity: IdentityService,
@@ -64,6 +68,17 @@ export class ClientesAppService {
       encontrados.find(
         (u) => q.email && u.usu_correo.toLowerCase() === q.email.toLowerCase(),
       ) ?? encontrados[0];
+    this.logger.log(
+      evento("clientes.consulta", {
+        correlation_id: currentCorrelationId(),
+        email: correoParcial(q.email),
+        identificacion: q.identificacion
+          ? `***${q.identificacion.slice(-3)}`
+          : null,
+        encontrado: Boolean(usuario),
+        client_id: usuario?.usu_uuid ?? null,
+      }),
+    );
     if (!usuario) {
       throw problem(
         HttpStatus.NOT_FOUND,
@@ -82,9 +97,18 @@ export class ClientesAppService {
   ): Promise<{ creado: boolean; cliente: ClienteResponseDto }> {
     const passwordHash = await bcrypt.hash(randomBytes(32).toString("hex"), 10);
     try {
-      return await this.dataSource.transaction((m) =>
+      const r = await this.dataSource.transaction((m) =>
         this.registrarEn(dto, passwordHash, m),
       );
+      this.logger.log(
+        evento("clientes.registro", {
+          correlation_id: currentCorrelationId(),
+          email: correoParcial(dto.email),
+          creado: r.creado,
+          client_id: r.cliente.client_id,
+        }),
+      );
+      return r;
     } catch (err) {
       // Dos altas simultáneas del mismo turista: la segunda devuelve la primera.
       if (String(err?.code) !== "23505") throw err;

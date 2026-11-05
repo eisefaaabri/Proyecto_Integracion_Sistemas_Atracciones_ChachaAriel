@@ -5,12 +5,14 @@ import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource } from "typeorm";
 import { Response } from "express";
 import { performance } from "perf_hooks";
+import { RabbitMqHealthService } from "./rabbitmq-health.service";
 
 const DB_TIMEOUT_MS = 3000;
 const LATENCIA_DEGRADADA_MS = 800;
 
 // Health para el panel de Booking (NodeHealthResponse) y el health check de Azure.
 // Consulta la base en cada llamada: así también mantiene activo Supabase.
+// RabbitMQ solo baja el estado a DEGRADED: el servicio sigue atendiendo por REST.
 @ApiTags("Catálogo")
 @Controller({ path: ["atracciones/health", "health"], version: ["2", "3"] })
 export class HealthController {
@@ -18,6 +20,7 @@ export class HealthController {
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly rabbit: RabbitMqHealthService,
     config: ConfigService,
   ) {
     this.nodeId = config.get<string>("PARTNER_SERVICE_ID", "NODE_ATR_ARIEL");
@@ -25,7 +28,10 @@ export class HealthController {
 
   @Get()
   @ApiOperation({ summary: "Healthcheck del microservicio para Booking" })
-  @ApiResponse({ status: 200, description: "UP o DEGRADED." })
+  @ApiResponse({
+    status: 200,
+    description: "UP o DEGRADED (base lenta o RabbitMQ caído).",
+  })
   @ApiResponse({ status: 503, description: "DOWN: sin conexión a la base." })
   async check(@Res({ passthrough: true }) res: Response) {
     const inicio = performance.now();
@@ -42,9 +48,10 @@ export class HealthController {
       conectada = false;
     }
     const latencia = Math.round(performance.now() - inicio);
+    const rabbit = await this.rabbit.estado();
     const status = !conectada
       ? "DOWN"
-      : latencia > LATENCIA_DEGRADADA_MS
+      : latencia > LATENCIA_DEGRADADA_MS || rabbit === "DOWN"
         ? "DEGRADED"
         : "UP";
     if (!conectada) res.status(HttpStatus.SERVICE_UNAVAILABLE);
@@ -55,9 +62,18 @@ export class HealthController {
       service_id: this.nodeId,
       node_id: this.nodeId,
       node_code: this.nodeId,
-      version: "3.0.0",
+      version: "3.3.0",
       database_connected: conectada,
+      rabbitmq_connected: rabbit === "UP",
       latency_ms: latencia,
+      dependencies: {
+        database: {
+          status: conectada ? "UP" : "DOWN",
+          engine: "PostgreSQL (Supabase)",
+          latency_ms: latencia,
+        },
+        rabbitmq: { status: rabbit },
+      },
       memory_usage_mb:
         Math.round((process.memoryUsage().rss / 1024 / 1024) * 10) / 10,
       uptime_seconds: Math.round(process.uptime()),

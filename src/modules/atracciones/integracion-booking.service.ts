@@ -19,6 +19,7 @@ import { CodigoEstadoReserva, Reserva } from "../booking/booking.entities";
 import { PaymentService } from "../payment/payment.service";
 import { CONSUMIDOR_FINAL } from "../billing-profile/billing-profile.service";
 import { DisponibilidadAppService } from "./disponibilidad-app.service";
+import { evento } from "../../common/logging/evento";
 import { ClientesAppService } from "./clientes-app.service";
 import {
   BookingCentralClient,
@@ -40,7 +41,6 @@ import {
 } from "./booking.utils";
 import {
   CancelBookingReservaDto,
-  CheckinBookingReservaDto,
   CreateBookingReservaDto,
   SolicitanteCancelacion,
   TipoDocumento,
@@ -77,6 +77,17 @@ interface ReservaNormalizada {
   solicitudes: string | null;
   bookingReservationId: string | null;
   clientId: string | null;
+}
+
+// Campos comunes del check-in de Booking (v3) y del panel web (v2).
+export interface DatosCheckin {
+  documento_identidad?: string;
+  codigo_voucher_qr?: string;
+  guia_codigo?: string;
+  guia_asignado?: string;
+  scanner_device_id?: string;
+  asistentes_reales?: number;
+  observaciones?: string;
 }
 
 export interface OpcionesCheckin {
@@ -155,6 +166,15 @@ export class IntegracionBookingService {
     idempotencyKey: string,
     correlationId: string,
   ) {
+    // Se registra al llegar, antes de validar, para ver también las rechazadas.
+    this.log("reserva.booking.recibida", correlationId, {
+      attraction_id: dto.attraction_id ?? dto.atraccion_id ?? null,
+      slot_id: dto.slot_id,
+      adult_count: dto.adult_count,
+      booking_reservation_id: dto.booking_reservation_id ?? null,
+      client_id: dto.client_id ?? dto.cliente_id ?? null,
+      idempotency_key: idempotencyKey,
+    });
     const datos = this.normalizar(dto);
     const hash = hashSolicitud(dto);
 
@@ -305,8 +325,7 @@ export class IntegracionBookingService {
           return this.respuestaDe(ganadora.idem_recurso_id);
       }
       this.logger.error(
-        JSON.stringify({
-          event: "reserva.booking.error",
+        evento("reserva.booking.error", {
           correlation_id: correlationId,
           error: err?.message,
         }),
@@ -386,7 +405,7 @@ export class IntegracionBookingService {
 
   async registrarCheckin(
     id: string,
-    dto: CheckinBookingReservaDto,
+    dto: DatosCheckin,
     idempotencyKey: string,
     correlationId: string,
     opciones: OpcionesCheckin = {},
@@ -418,7 +437,11 @@ export class IntegracionBookingService {
           );
         }
         const titular = this.bookings.titular(reserva);
-        if (dto.documento_identidad.toUpperCase() !== titular?.pax_documento) {
+        // Booking siempre envía el documento; el guía en la web puede omitirlo.
+        if (
+          (dto.documento_identidad || !opciones.cualquierCanal) &&
+          dto.documento_identidad?.toUpperCase() !== titular?.pax_documento
+        ) {
           throw problem(
             HttpStatus.FORBIDDEN,
             "IDENTITY_MISMATCH",
@@ -503,13 +526,16 @@ export class IntegracionBookingService {
 
   private async notificarCheckin(
     v: VistaReserva,
-    dto: CheckinBookingReservaDto,
+    dto: DatosCheckin,
     opciones: OpcionesCheckin,
     correlationId: string,
   ): Promise<ResultadoNotificacion> {
-    const validadoCon = dto.codigo_voucher_qr
-      ? "código QR y documento de identidad"
-      : "documento de identidad";
+    const validadoCon = [
+      dto.codigo_voucher_qr && "código QR",
+      dto.documento_identidad && "documento de identidad",
+    ]
+      .filter(Boolean)
+      .join(" y ");
     return this.bookingCentral.notificarCheckin(
       {
         external_order_id: v.orden.ord_numero,
@@ -525,7 +551,9 @@ export class IntegracionBookingService {
         fecha_checkin: v.reserva.res_checkin_en.toISOString(),
         observaciones:
           dto.observaciones?.trim() ||
-          `Turista validado en punto de encuentro con ${validadoCon}`,
+          (validadoCon
+            ? `Turista validado en punto de encuentro con ${validadoCon}`
+            : "Asistencia confirmada por el guía en el punto de encuentro"),
       },
       correlationId,
     );
@@ -693,7 +721,7 @@ export class IntegracionBookingService {
   }
 
   private async enTransaccion<T>(
-    evento: string,
+    nombre: string,
     correlationId: string,
     fn: (m: EntityManager) => Promise<T>,
   ): Promise<T> {
@@ -701,15 +729,14 @@ export class IntegracionBookingService {
       return await this.dataSource.transaction(fn);
     } catch (err) {
       if (err instanceof HttpException) {
-        this.log(`${evento}.rechazada`, correlationId, {
+        this.log(`${nombre}.rechazada`, correlationId, {
           status: err.getStatus(),
           code: (err.getResponse() as any)?.code,
         });
         throw err;
       }
       this.logger.error(
-        JSON.stringify({
-          event: `${evento}.error`,
+        evento(`${nombre}.error`, {
           correlation_id: correlationId,
           error: err?.message,
         }),
@@ -768,6 +795,7 @@ export class IntegracionBookingService {
       reservation_code: reserva.res_codigo,
       estado: "CHECKED_IN",
       status: "CHECKED_IN",
+      estado_asistencia: "CONFIRMADO_ASISTIDO",
       titular_nombre: titular?.pax_nombre,
       titular_documento: titular?.pax_documento,
       guia_asignado: reserva.res_checkin_guia ?? "Por asignar",
@@ -856,8 +884,6 @@ export class IntegracionBookingService {
   }
 
   private log(event: string, correlationId: string | undefined, data: object) {
-    this.logger.log(
-      JSON.stringify({ event, correlation_id: correlationId, ...data }),
-    );
+    this.logger.log(evento(event, { correlation_id: correlationId, ...data }));
   }
 }

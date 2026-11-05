@@ -6,6 +6,7 @@ import { ClientesController } from "./clientes.controller";
 import { ClientesAppService } from "./clientes-app.service";
 import { AdminReservasController } from "./admin-reservas.controller";
 import { BookingCentralClient } from "./booking-central.client";
+import { RabbitMqHealthService } from "./rabbitmq-health.service";
 import { DisponibilidadController } from "./disponibilidad.controller";
 import { InventarioBookingClient } from "./inventario-booking.client";
 import { CatalogoBookingController } from "./catalogo-booking.controller";
@@ -72,6 +73,7 @@ import { InvoicingModule } from "../invoicing/invoicing.module";
     OutboxService,
     ClientesAppService,
     BookingCentralClient,
+    RabbitMqHealthService,
     RolesGuard,
     ApiKeyGuard,
   ],
