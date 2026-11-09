@@ -151,6 +151,11 @@ export class OrderService {
     return new Map(filas.map((o) => [o.ord_id, o]));
   }
 
+  porUsuarios(usuIds: number[]): Promise<Orden[]> {
+    if (!usuIds.length) return Promise.resolve([]);
+    return this.ordenes.find({ where: { usu_id: In([...new Set(usuIds)]) } });
+  }
+
   delUsuario(usuId: number): Promise<Orden[]> {
     return this.ordenes.find({
       where: { usu_id: usuId },

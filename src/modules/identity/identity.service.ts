@@ -163,6 +163,39 @@ export class IdentityService {
     });
   }
 
+  /** Usuarios con alguno de los roles, con búsqueda por correo, nombre o documento. */
+  listarPorRoles(
+    roles: NombreRol[],
+    opciones: { q?: string | null; skip?: number; take?: number } = {},
+  ): Promise<[Usuario[], number]> {
+    const qb = this.usuarios
+      .createQueryBuilder("u")
+      .innerJoinAndSelect("u.roles", "ur")
+      .innerJoinAndSelect("ur.rol", "r")
+      .where("r.rol_nombre IN (:...roles)", { roles });
+    if (opciones.q) {
+      const patron = `%${opciones.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+      qb.andWhere(
+        new Brackets((b) =>
+          b
+            .where("u.usu_correo ILIKE :patron", { patron })
+            .orWhere("u.usu_nombre ILIKE :patron", { patron })
+            .orWhere("u.usu_apellido ILIKE :patron", { patron })
+            .orWhere("u.usu_documento ILIKE :patron", { patron }),
+        ),
+      );
+    }
+    return qb
+      .orderBy("u.usu_creado_en", "DESC")
+      .skip(opciones.skip)
+      .take(opciones.take)
+      .getManyAndCount();
+  }
+
+  async cambiarEstado(usuId: number, activo: boolean): Promise<void> {
+    await this.usuarios.update({ usu_id: usuId }, { usu_activo: activo });
+  }
+
   listar(): Promise<Usuario[]> {
     return this.usuarios.find({
       relations: { roles: { rol: true } },

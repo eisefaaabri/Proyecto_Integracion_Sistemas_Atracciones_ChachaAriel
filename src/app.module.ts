@@ -7,6 +7,8 @@ import { CommonModule } from "./common/common.module";
 import { buildTypeOrmOptions } from "./config/database.config";
 import { AtraccionesModule } from "./modules/atracciones/atracciones.module";
 import { AuthModule } from "./modules/auth/auth.module";
+import { ClientesModule } from "./modules/clientes/clientes.module";
+import { PersonalModule } from "./modules/personal/personal.module";
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { AuthModule } from "./modules/auth/auth.module";
 
     CommonModule,
     AuthModule,
+    ClientesModule,
+    PersonalModule,
     AtraccionesModule,
 
     ThrottlerModule.forRoot([

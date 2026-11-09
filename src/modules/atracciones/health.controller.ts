@@ -17,6 +17,7 @@ const LATENCIA_DEGRADADA_MS = 800;
 @Controller({ path: ["atracciones/health", "health"], version: ["2", "3"] })
 export class HealthController {
   private readonly nodeId: string;
+  private readonly motor: string;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -24,6 +25,11 @@ export class HealthController {
     config: ConfigService,
   ) {
     this.nodeId = config.get<string>("PARTNER_SERVICE_ID", "NODE_ATR_ARIEL");
+    this.motor = /supabase\.(com|co)/.test(
+      config.get<string>("DATABASE_URL", ""),
+    )
+      ? "PostgreSQL (Supabase)"
+      : "PostgreSQL";
   }
 
   @Get()
@@ -62,14 +68,14 @@ export class HealthController {
       service_id: this.nodeId,
       node_id: this.nodeId,
       node_code: this.nodeId,
-      version: "3.3.0",
+      version: "3.4.0",
       database_connected: conectada,
       rabbitmq_connected: rabbit === "UP",
       latency_ms: latencia,
       dependencies: {
         database: {
           status: conectada ? "UP" : "DOWN",
-          engine: "PostgreSQL (Supabase)",
+          engine: this.motor,
           latency_ms: latencia,
         },
         rabbitmq: { status: rabbit },

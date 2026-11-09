@@ -20,7 +20,7 @@ import { PaymentService } from "../payment/payment.service";
 import { CONSUMIDOR_FINAL } from "../billing-profile/billing-profile.service";
 import { DisponibilidadAppService } from "./disponibilidad-app.service";
 import { evento } from "../../common/logging/evento";
-import { ClientesAppService } from "./clientes-app.service";
+import { ClientesService } from "../clientes/clientes.service";
 import {
   BookingCentralClient,
   ResultadoNotificacion,
@@ -148,7 +148,7 @@ export class IntegracionBookingService {
     private readonly payments: PaymentService,
     private readonly reservas: ReservasAppService,
     private readonly disponibilidad: DisponibilidadAppService,
-    private readonly clientes: ClientesAppService,
+    private readonly clientes: ClientesService,
     private readonly bookingCentral: BookingCentralClient,
     config: ConfigService,
   ) {

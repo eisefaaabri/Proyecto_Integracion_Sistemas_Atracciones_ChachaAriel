@@ -15,19 +15,20 @@ import {
 } from "@nestjs/swagger";
 import { Response } from "express";
 import { ApiKeyGuard } from "../../common/guards/api-key.guard";
-import { ClientesAppService } from "./clientes-app.service";
+import { ClientesService } from "./clientes.service";
 import {
   ClienteResponseDto,
   ClientesQueryDto,
   CreateClienteDto,
 } from "./dto/clientes.dto";
 
+// Booking consulta y registra turistas antes de reservar (contrato v3.1).
 @ApiTags("Integración Booking (v3)")
 @Controller({ path: "clientes", version: "3" })
 @UseGuards(ApiKeyGuard)
 @ApiSecurity("ApiKeyAuth")
-export class ClientesController {
-  constructor(private readonly clientes: ClientesAppService) {}
+export class ClientesBookingController {
+  constructor(private readonly clientes: ClientesService) {}
 
   @Get()
   @ApiOperation({

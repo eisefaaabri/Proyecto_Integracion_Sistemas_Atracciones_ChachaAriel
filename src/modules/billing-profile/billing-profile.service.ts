@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { EntityManager, Repository } from "typeorm";
+import { EntityManager, In, Repository } from "typeorm";
 import { DatoFacturacion } from "./billing-profile.entities";
 
 export type TipoIdentificacion =
@@ -47,6 +47,21 @@ export class BillingProfileService {
       dfa_telefono:
         telefono && /^\+?[0-9]{7,15}$/.test(telefono) ? telefono : null,
       dfa_es_principal: true,
+    });
+  }
+
+  async principales(usuIds: number[]): Promise<Map<number, DatoFacturacion>> {
+    if (!usuIds.length) return new Map();
+    const filas = await this.datos.find({
+      where: { usu_id: In(usuIds), dfa_es_principal: true, dfa_activo: true },
+    });
+    return new Map(filas.map((d) => [d.usu_id, d]));
+  }
+
+  activos(usuId: number): Promise<DatoFacturacion[]> {
+    return this.datos.find({
+      where: { usu_id: usuId, dfa_activo: true },
+      order: { dfa_es_principal: "DESC" },
     });
   }
 

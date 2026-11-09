@@ -65,6 +65,8 @@ export class AuthController {
   @Roles("ADMIN")
   @ApiOperation({
     summary: "Crear un nuevo usuario con rol asignado (solo ADMIN)",
+    description: "Obsoleto: usa POST /api/v2/admin/personal.",
+    deprecated: true,
   })
   @ApiResponse({ status: 201, description: "Usuario creado con éxito" })
   @ApiResponse({ status: 409, description: "Email o DNI ya registrado" })
@@ -75,7 +77,12 @@ export class AuthController {
   @Get("users")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("ADMIN")
-  @ApiOperation({ summary: "Listar todos los usuarios (solo ADMIN)" })
+  @ApiOperation({
+    summary: "Listar todos los usuarios (solo ADMIN)",
+    description:
+      "Obsoleto: usa /api/v2/admin/clientes y /api/v2/admin/personal.",
+    deprecated: true,
+  })
   async getAllUsers() {
     return this.authService.getAllUsers();
   }
@@ -83,7 +90,11 @@ export class AuthController {
   @Patch("users/:id/role")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles("ADMIN")
-  @ApiOperation({ summary: "Actualizar el rol de un usuario (solo ADMIN)" })
+  @ApiOperation({
+    summary: "Actualizar el rol de un usuario (solo ADMIN)",
+    description: "Obsoleto: usa PATCH /api/v2/admin/personal/{id}/rol.",
+    deprecated: true,
+  })
   async updateUserRole(@Param("id") id: string, @Body("rol") rol: RolUsuario) {
     return this.authService.updateUserRole(id, rol);
   }
