@@ -3,6 +3,7 @@ import { AtraccionesService } from "./atracciones.service";
 import { AtraccionesController } from "./atracciones.controller";
 import { IntegracionBookingController } from "./integracion-booking.controller";
 import { AdminReservasController } from "./admin-reservas.controller";
+import { AdminStockController } from "./admin-stock.controller";
 import { BookingCentralClient } from "./booking-central.client";
 import { RabbitMqHealthService } from "./rabbitmq-health.service";
 import { DisponibilidadController } from "./disponibilidad.controller";
@@ -61,6 +62,7 @@ import { ClientesModule } from "../clientes/clientes.module";
     IntegracionBookingController,
     DisponibilidadController,
     AdminReservasController,
+    AdminStockController,
   ],
   providers: [
     AtraccionesService,

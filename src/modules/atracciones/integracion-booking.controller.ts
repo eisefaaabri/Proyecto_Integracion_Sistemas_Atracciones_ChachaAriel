@@ -101,7 +101,7 @@ export class IntegracionBookingController {
   @ApiOperation({
     summary: "Cancelar una reserva (compensación de la Saga)",
     description:
-      "Reintegra los cupos y marca la factura como reembolsada. Repetir la llamada devuelve 200 con el mismo estado.",
+      "Reintegra los cupos. Política de Ecuatravel: sin reembolso (monto_reembolsado 0). Repetir la llamada devuelve 200 con el mismo estado.",
   })
   @ApiParam(ID_PARAM)
   @ApiHeader({ name: "Idempotency-Key", required: false })

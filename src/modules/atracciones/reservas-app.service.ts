@@ -316,7 +316,8 @@ export class ReservasAppService {
   }
 
   /**
-   * Cancela, libera el cupo y, si estaba pagada, emite el reembolso.
+   * Cancela y libera el cupo. Política de Ecuatravel (acordada con Booking): no hay
+   * reembolsos; una reserva pagada conserva su pago y su factura.
    * Devuelve false si ya estaba cancelada (operación idempotente).
    */
   async cancelar(
@@ -349,28 +350,19 @@ export class ReservasAppService {
     );
 
     const pago = await this.payments.aprobado(orden.ord_id, manager);
-    let reembolso: Reembolso | null = null;
-    if (pago) {
-      reembolso = await this.refunds.crear(
-        {
-          pagId: pago.pag_id,
-          numero: `REF-${reserva.res_codigo}`,
-          monto: pago.pag_monto,
-          motivo: datos.motivo ?? "Cancelación de la reserva",
-        },
+    await this.orders.cambiarEstado(
+      orden.ord_id,
+      CodigoEstadoOrden.CANCELADA,
+      manager,
+    );
+    // Sin pago no hubo venta: la factura se anula. Con pago, la venta se mantiene.
+    if (!pago) {
+      await this.invoicing.cambiarEstado(
+        orden.ord_id,
+        CodigoEstadoFactura.ANULADA,
         manager,
       );
     }
-    await this.orders.cambiarEstado(
-      orden.ord_id,
-      pago ? CodigoEstadoOrden.REEMBOLSADA : CodigoEstadoOrden.CANCELADA,
-      manager,
-    );
-    await this.invoicing.cambiarEstado(
-      orden.ord_id,
-      CodigoEstadoFactura.ANULADA,
-      manager,
-    );
 
     const actual = await this.armarVista(
       await this.bookings.porId(reserva.res_id, manager),
@@ -378,7 +370,7 @@ export class ReservasAppService {
       {
         atraccion: vista.atraccion,
         pago,
-        reembolso,
+        reembolso: null,
       },
     );
     await this.registrarEventos(
@@ -391,6 +383,7 @@ export class ReservasAppService {
         }),
         cancellation_reason: datos.motivo,
         requested_by: datos.solicitante,
+        refund_policy: "NO_REFUND",
       },
     );
     return true;

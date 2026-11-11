@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { EntityManager, In, IsNull, Repository } from "typeorm";
+import { EntityManager, In, IsNull, Not, Repository } from "typeorm";
 import {
   Atraccion,
   AtraccionFoto,
@@ -131,6 +131,24 @@ export class CatalogService {
     const conRelaciones = await this.findByIds(filas.map((a) => a.atr_id));
     const porId = new Map(conRelaciones.map((a) => [a.atr_id, a]));
     return [filas.map((a) => porId.get(a.atr_id)), total];
+  }
+
+  /** Atracciones visibles en el panel de stock (todas menos borradores y eliminadas). */
+  listarParaStock(): Promise<Atraccion[]> {
+    return this.atracciones.find({
+      select: {
+        atr_id: true,
+        atr_uuid: true,
+        atr_nombre: true,
+        atr_estado: true,
+        atr_codigo_aeropuerto: true,
+      },
+      where: {
+        atr_estado: Not(EstadoAtraccion.BORRADOR),
+        atr_eliminado_en: IsNull(),
+      },
+      order: { atr_nombre: "ASC" },
+    });
   }
 
   listarPublicadasIds(): Promise<Atraccion[]> {

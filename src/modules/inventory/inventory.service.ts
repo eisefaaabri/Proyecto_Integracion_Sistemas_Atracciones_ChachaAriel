@@ -85,6 +85,41 @@ export class InventoryService {
     return filas.map((d) => d.dis_id);
   }
 
+  /** cuposDelDia para varias atracciones a la vez (panel de stock). */
+  async cuposDeFecha(
+    atrIds: number[],
+    fecha: string,
+  ): Promise<Map<number, CupoTurno[]>> {
+    const resultado = new Map<number, CupoTurno[]>();
+    if (!atrIds.length) return resultado;
+    const ids = In([...new Set(atrIds)]);
+    const [horarios, filas, bloqueos] = await Promise.all([
+      this.horariosActivos(atrIds),
+      this.disponibilidades.find({ where: { atr_id: ids, dis_fecha: fecha } }),
+      this.horarios.manager.find(FechaBloqueada, {
+        where: { atr_id: ids, fb_fecha: fecha },
+      }),
+    ]);
+    const disp = new Map(filas.map((d) => [d.hor_id, d]));
+    const bloqueadas = new Set(bloqueos.map((b) => b.atr_id));
+    for (const [atrId, hs] of horarios) {
+      resultado.set(
+        atrId,
+        hs.map((h) => {
+          const d = disp.get(h.hor_id);
+          return {
+            horId: h.hor_id,
+            hora: hhmm(h.hor_hora),
+            total: d?.dis_cupo_total ?? h.hor_cupo,
+            reservado: d?.dis_cupo_reservado ?? 0,
+            cerrada: bloqueadas.has(atrId) || Boolean(d?.dis_cerrada),
+          };
+        }),
+      );
+    }
+    return resultado;
+  }
+
   async cuposDelDia(
     atrId: number,
     fecha: string,

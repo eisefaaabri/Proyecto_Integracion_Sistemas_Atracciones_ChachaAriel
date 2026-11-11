@@ -54,7 +54,8 @@ const MENSAJE_ESTADO: Record<string, string> = {
   CONFIRMED: "Reserva confirmada en Ecuatravel.",
   CHECKED_IN: "Check-in registrado en Ecuatravel.",
   COMPLETED: "Reserva completada en Ecuatravel.",
-  CANCELLED: "Reserva cancelada; cupos reintegrados y reembolso emitido.",
+  CANCELLED:
+    "Reserva cancelada; cupos reintegrados. Sin reembolso según la política de Ecuatravel.",
 };
 
 interface ReservaNormalizada {
@@ -468,7 +469,8 @@ export class IntegracionBookingService {
             "ATTENDEES_EXCEED_TICKETS",
             "asistentes-exceden-boletos",
             "Asistentes mayores que los boletos",
-            `La reserva ${reserva.res_codigo} tiene ${reserva.res_numero_tickets} boletos.`,
+            `La reserva ${reserva.res_codigo} tiene ${reserva.res_numero_tickets} boletos. ` +
+              "Las personas adicionales deben comprar una nueva reserva en Booking o en la web de Ecuatravel.",
           );
         }
         if (reserva.res_checkin_en) {
@@ -869,8 +871,10 @@ export class IntegracionBookingService {
         hora_checkin: reserva.res_checkin_en.toISOString(),
       }),
       ...(status === "CANCELLED" && {
-        reembolso_id: v.reembolso?.rem_numero ?? `REF-${reserva.res_codigo}`,
-        monto_reembolsado: v.reembolso?.rem_monto ?? total,
+        // Política sin reembolsos: solo las cancelaciones antiguas traen uno.
+        politica_reembolso: "SIN_REEMBOLSO",
+        reembolso_id: v.reembolso?.rem_numero ?? null,
+        monto_reembolsado: v.reembolso?.rem_monto ?? "0.00",
         cancelled_at: reserva.res_cancelado_en?.toISOString() ?? null,
       }),
       _links: {
