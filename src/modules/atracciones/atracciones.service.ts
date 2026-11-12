@@ -44,6 +44,7 @@ import {
   toAtraccionApi,
 } from "./mappers/atraccion.mapper";
 import { DisponibilidadAppService } from "./disponibilidad-app.service";
+import { detalleReembolso, restitucionStock } from "./cancelacion.util";
 import {
   ReservaUsadaError,
   ReservasAppService,
@@ -283,6 +284,10 @@ export class AtraccionesService {
       time: v.turno?.hora,
       customer_name:
         nombreCliente ?? this.bookings.titular(v.reserva)?.pax_nombre,
+      reservation_code: v.reserva.res_codigo,
+      canal: v.orden?.ord_canal,
+      checked_in: Boolean(v.reserva.res_checkin_en),
+      checkin_at: v.reserva.res_checkin_en?.toISOString() ?? null,
     };
   }
 
@@ -526,17 +531,38 @@ export class AtraccionesService {
       } catch (err) {
         if (err instanceof ReservaUsadaError) {
           throw new ConflictException(
-            "La reserva ya fue utilizada y no puede cancelarse",
+            "No se puede cancelar una reserva que ya realizó check-in o fue asistida.",
           );
         }
         throw err;
       }
-      return this.aRespuesta(
-        await this.reservas.vista(
-          await this.bookings.porId(vista.reserva.res_id, m),
-          m,
-        ),
+      const actual = await this.reservas.vista(
+        await this.bookings.porId(vista.reserva.res_id, m),
+        m,
       );
+      const turno = (
+        await this.inventory.cuposDelDia(
+          actual.atraccion.atr_id,
+          actual.turno.fecha,
+          m,
+        )
+      ).find((t) => t.hora === actual.turno.hora);
+      return {
+        ...this.aRespuesta(actual),
+        ...detalleReembolso(actual),
+        stock_restoration: restitucionStock(
+          liberada ? actual.reserva.res_numero_tickets : null,
+          turno && {
+            libres: turno.cerrada
+              ? 0
+              : Math.max(turno.total - turno.reservado, 0),
+            total: turno.total,
+          },
+        ),
+        message: liberada
+          ? "Reserva cancelada exitosamente y cupos restituidos."
+          : "La reserva ya estaba cancelada.",
+      };
     });
     if (liberada)
       void this.disponibilidad.notificarStock(

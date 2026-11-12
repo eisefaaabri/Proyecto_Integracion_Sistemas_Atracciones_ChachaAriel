@@ -32,6 +32,7 @@ import {
 import { PaymentService } from "../payment/payment.service";
 import { CodigoMetodoPago, Pago } from "../payment/payment.entities";
 import { RefundService } from "../refund/refund.service";
+import { codigoReembolso } from "./cancelacion.util";
 import { Reembolso } from "../refund/refund.entities";
 import { Comprador, InvoicingService } from "../invoicing/invoicing.service";
 import { CodigoEstadoFactura } from "../invoicing/invoicing.entities";
@@ -316,8 +317,8 @@ export class ReservasAppService {
   }
 
   /**
-   * Cancela y libera el cupo. Política de Ecuatravel (acordada con Booking): no hay
-   * reembolsos; una reserva pagada conserva su pago y su factura.
+   * Cancela, libera el cupo y, si estaba pagada, registra el reembolso simulado del
+   * 100 % (regla oficial con Booking; después del check-in no se cancela).
    * Devuelve false si ya estaba cancelada (operación idempotente).
    */
   async cancelar(
@@ -350,19 +351,27 @@ export class ReservasAppService {
     );
 
     const pago = await this.payments.aprobado(orden.ord_id, manager);
+    const reembolso = pago
+      ? await this.refunds.crear(
+          {
+            pagId: pago.pag_id,
+            numero: codigoReembolso(reserva.res_codigo),
+            monto: pago.pag_monto,
+            motivo: datos.motivo ?? "Cancelación de la reserva",
+          },
+          manager,
+        )
+      : null;
     await this.orders.cambiarEstado(
       orden.ord_id,
-      CodigoEstadoOrden.CANCELADA,
+      pago ? CodigoEstadoOrden.REEMBOLSADA : CodigoEstadoOrden.CANCELADA,
       manager,
     );
-    // Sin pago no hubo venta: la factura se anula. Con pago, la venta se mantiene.
-    if (!pago) {
-      await this.invoicing.cambiarEstado(
-        orden.ord_id,
-        CodigoEstadoFactura.ANULADA,
-        manager,
-      );
-    }
+    await this.invoicing.cambiarEstado(
+      orden.ord_id,
+      CodigoEstadoFactura.ANULADA,
+      manager,
+    );
 
     const actual = await this.armarVista(
       await this.bookings.porId(reserva.res_id, manager),
@@ -370,7 +379,7 @@ export class ReservasAppService {
       {
         atraccion: vista.atraccion,
         pago,
-        reembolso: null,
+        reembolso,
       },
     );
     await this.registrarEventos(
@@ -383,7 +392,12 @@ export class ReservasAppService {
         }),
         cancellation_reason: datos.motivo,
         requested_by: datos.solicitante,
-        refund_policy: "NO_REFUND",
+        refund: reembolso && {
+          refund_id: reembolso.rem_numero,
+          amount: Number(reembolso.rem_monto),
+          currency: "USD",
+        },
+        restored_spots: reserva.res_numero_tickets,
       },
     );
     return true;

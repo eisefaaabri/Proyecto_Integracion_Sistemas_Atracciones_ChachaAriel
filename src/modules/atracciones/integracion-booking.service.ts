@@ -20,6 +20,7 @@ import { PaymentService } from "../payment/payment.service";
 import { CONSUMIDOR_FINAL } from "../billing-profile/billing-profile.service";
 import { DisponibilidadAppService } from "./disponibilidad-app.service";
 import { evento } from "../../common/logging/evento";
+import { detalleReembolso, restitucionStock } from "./cancelacion.util";
 import { ClientesService } from "../clientes/clientes.service";
 import {
   BookingCentralClient,
@@ -54,8 +55,7 @@ const MENSAJE_ESTADO: Record<string, string> = {
   CONFIRMED: "Reserva confirmada en Ecuatravel.",
   CHECKED_IN: "Check-in registrado en Ecuatravel.",
   COMPLETED: "Reserva completada en Ecuatravel.",
-  CANCELLED:
-    "Reserva cancelada; cupos reintegrados. Sin reembolso según la política de Ecuatravel.",
+  CANCELLED: "Reserva cancelada exitosamente y cupos restituidos.",
 };
 
 interface ReservaNormalizada {
@@ -363,15 +363,24 @@ export class IntegracionBookingService {
             { motivo, solicitante },
             manager,
           );
-          if (!cambio) return this.toResponse(vista);
+          // Ya estaba cancelada: 200 con el estado actual, sin volver a sumar cupos.
+          if (!cambio)
+            return {
+              ...this.toResponse(vista),
+              stock_restoration: restitucionStock(
+                null,
+                await this.cupoTurno(vista, manager),
+              ),
+            };
         } catch (err) {
           if (err instanceof ReservaUsadaError) {
             throw problem(
               HttpStatus.CONFLICT,
               "ALREADY_CHECKED_IN",
               "reserva-con-checkin",
-              "La reserva ya registró check-in",
-              `La reserva ${vista.reserva.res_codigo} ya fue utilizada y no puede cancelarse.`,
+              "Cancelación No Permitida",
+              "No se puede cancelar una reserva que ya realizó check-in o fue asistida.",
+              { reservation_code: vista.reserva.res_codigo },
             );
           }
           throw err;
@@ -391,7 +400,13 @@ export class IntegracionBookingService {
           atrUuid: actual.atraccion.atr_uuid,
           fecha: actual.turno.fecha,
         };
-        return this.toResponse(actual);
+        return {
+          ...this.toResponse(actual),
+          stock_restoration: restitucionStock(
+            actual.reserva.res_numero_tickets,
+            await this.cupoTurno(actual, manager),
+          ),
+        };
       },
     );
     // Después del commit, para que la lectura del aforo vea los cupos liberados.
@@ -503,7 +518,13 @@ export class IntegracionBookingService {
           },
           manager,
         );
-        const actual = await this.buscarReserva(manager, reserva.res_uuid);
+        // Mismo filtro de canal que la búsqueda inicial: desde la web también hay reservas WEB.
+        const actual = await this.buscarReserva(
+          manager,
+          reserva.res_uuid,
+          false,
+          opciones.cualquierCanal,
+        );
         this.log("reserva.booking.checkin", correlationId, {
           reservation_id: reserva.res_uuid,
           reservation_code: reserva.res_codigo,
@@ -559,6 +580,25 @@ export class IntegracionBookingService {
       },
       correlationId,
     );
+  }
+
+  /** Cupo libre del turno de la reserva (para informar la restitución). */
+  private async cupoTurno(v: VistaReserva, manager: EntityManager) {
+    const turno = (
+      await this.inventory.cuposDelDia(
+        v.atraccion.atr_id,
+        v.turno.fecha,
+        manager,
+      )
+    ).find((t) => t.hora === v.turno.hora);
+    return turno
+      ? {
+          libres: turno.cerrada
+            ? 0
+            : Math.max(turno.total - turno.reservado, 0),
+          total: turno.total,
+        }
+      : null;
   }
 
   private sinCupo(
@@ -871,10 +911,7 @@ export class IntegracionBookingService {
         hora_checkin: reserva.res_checkin_en.toISOString(),
       }),
       ...(status === "CANCELLED" && {
-        // Política sin reembolsos: solo las cancelaciones antiguas traen uno.
-        politica_reembolso: "SIN_REEMBOLSO",
-        reembolso_id: v.reembolso?.rem_numero ?? null,
-        monto_reembolsado: v.reembolso?.rem_monto ?? "0.00",
+        ...detalleReembolso(v),
         cancelled_at: reserva.res_cancelado_en?.toISOString() ?? null,
       }),
       _links: {

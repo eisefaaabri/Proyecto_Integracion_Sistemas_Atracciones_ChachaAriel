@@ -94,6 +94,25 @@ export class ReservationResponseDto {
 
   @ApiProperty({ description: "Precio total de la reserva", type: PriceDto })
   total_price: PriceDto;
+
+  @ApiProperty({ example: "ECT-7KQ2M9", required: false })
+  reservation_code?: string;
+
+  @ApiProperty({
+    enum: ["WEB", "BOOKING"],
+    required: false,
+    description: "Las reservas de Booking se cancelan desde Booking",
+  })
+  canal?: string;
+
+  @ApiProperty({
+    required: false,
+    description: "true si ya hizo check-in (servicio iniciado, no cancelable)",
+  })
+  checked_in?: boolean;
+
+  @ApiProperty({ required: false, nullable: true, format: "date-time" })
+  checkin_at?: string | null;
 }
 
 export class CancelReservationRequestDto {
