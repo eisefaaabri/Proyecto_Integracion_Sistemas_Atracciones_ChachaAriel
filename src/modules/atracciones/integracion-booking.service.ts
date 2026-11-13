@@ -582,9 +582,11 @@ export class IntegracionBookingService {
     ]
       .filter(Boolean)
       .join(" y ");
+    // Booking identifica la reserva por su código ECT-XXXXXX (así la consulta en
+    // GET /reservas/{código}); el UUID y el número de orden quedan como respaldo.
     return this.bookingCentral.notificarCheckin(
       {
-        external_order_id: v.orden.ord_numero,
+        external_order_id: v.reserva.res_codigo,
         client_id: await this.clientes.clientIdDeOrden(v.orden),
         estado: "CONFIRMADO_ASISTIDO",
         asistentes_reales:
@@ -602,6 +604,7 @@ export class IntegracionBookingService {
             : "Asistencia confirmada por el guía en el punto de encuentro"),
       },
       correlationId,
+      [v.reserva.res_uuid, v.orden.ord_numero],
     );
   }
 

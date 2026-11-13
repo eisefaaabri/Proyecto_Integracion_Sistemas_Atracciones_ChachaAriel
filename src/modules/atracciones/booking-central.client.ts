@@ -18,6 +18,10 @@ export type EstadoNotificacion =
 export interface ResultadoNotificacion {
   estado: EstadoNotificacion;
   http_status?: number;
+  // Identificador con el que Booking aceptó (o rechazó) el aviso.
+  external_order_id?: string;
+  // Mensaje de error que devolvió Booking, para mostrarlo en el panel.
+  detalle?: string;
 }
 
 const TIMEOUT_MS = 6000;
@@ -27,6 +31,8 @@ const REINTENTOS_MS = [10_000, 60_000, 300_000];
 /**
  * Avisa a Booking Central que el turista asistió (contrato v3.1):
  * POST {BOOKING_CENTRAL_URL}/reservas/{external_order_id}/checkin con X-API-Key.
+ * Booking identifica la reserva por el código ECT-XXXXXX; si responde 404 se prueba
+ * con los identificadores alternativos (UUID y número de orden).
  */
 @Injectable()
 export class BookingCentralClient {
@@ -50,11 +56,20 @@ export class BookingCentralClient {
   async notificarCheckin(
     datos: CheckinBookingCentral,
     correlationId?: string,
+    alternativas: string[] = [],
   ): Promise<ResultadoNotificacion> {
     if (!this.baseUrl) return { estado: "NO_CONFIGURADO" };
-    const resultado = await this.enviar(datos, correlationId, 1);
-    if (resultado.estado === "REINTENTANDO")
-      this.reintentar(datos, correlationId, 0);
+    const ids = [...new Set([datos.external_order_id, ...alternativas])];
+    let resultado: ResultadoNotificacion;
+    for (const id of ids) {
+      const intento = { ...datos, external_order_id: id };
+      resultado = await this.enviar(intento, correlationId, 1);
+      if (resultado.estado === "REINTENTANDO")
+        this.reintentar(intento, correlationId, 0);
+      // Solo un 404 (Booking no conoce ese identificador) justifica probar el siguiente.
+      if (!(resultado.estado === "RECHAZADO" && resultado.http_status === 404))
+        return resultado;
+    }
     return resultado;
   }
 
@@ -96,17 +111,31 @@ export class BookingCentralClient {
           intento,
           http_status: res.status,
         });
-        return { estado: "NOTIFICADO", http_status: res.status };
+        return {
+          estado: "NOTIFICADO",
+          http_status: res.status,
+          external_order_id: datos.external_order_id,
+        };
       }
       const transitorio = res.status >= 500 || [408, 429].includes(res.status);
+      const cuerpo = (await res.text().catch(() => "")).slice(0, 300);
       this.log("warn", "booking.checkin.fallido", correlationId, datos, {
         intento,
         http_status: res.status,
-        detalle: (await res.text().catch(() => "")).slice(0, 300),
+        detalle: cuerpo,
       });
+      let detalle = cuerpo;
+      try {
+        const j = JSON.parse(cuerpo);
+        detalle = [j.code, j.detail ?? j.message].filter(Boolean).join(": ");
+      } catch {
+        // Booking no respondió JSON: se muestra el texto tal cual.
+      }
       return {
         estado: transitorio ? "REINTENTANDO" : "RECHAZADO",
         http_status: res.status,
+        external_order_id: datos.external_order_id,
+        detalle: detalle || undefined,
       };
     } catch (err) {
       this.log("warn", "booking.checkin.fallido", correlationId, datos, {
