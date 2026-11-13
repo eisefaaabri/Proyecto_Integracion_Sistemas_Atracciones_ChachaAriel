@@ -44,8 +44,14 @@ import {
   toAtraccionApi,
 } from "./mappers/atraccion.mapper";
 import { DisponibilidadAppService } from "./disponibilidad-app.service";
-import { detalleReembolso, restitucionStock } from "./cancelacion.util";
 import {
+  dentroDePlazo,
+  detalleReembolso,
+  limiteCancelacion,
+  restitucionStock,
+} from "./cancelacion.util";
+import {
+  CancelacionFueraDePlazoError,
   ReservaUsadaError,
   ReservasAppService,
   SinCupoError,
@@ -287,6 +293,14 @@ export class AtraccionesService {
       reservation_code: v.reserva.res_codigo,
       canal: v.orden?.ord_canal,
       checked_in: Boolean(v.reserva.res_checkin_en),
+      cancelable:
+        v.estado === CodigoEstadoReserva.CONFIRMADA &&
+        !v.reserva.res_checkin_en &&
+        Boolean(v.turno) &&
+        dentroDePlazo(v.turno.fecha, v.turno.hora),
+      cancelable_until: v.turno
+        ? limiteCancelacion(v.turno.fecha, v.turno.hora).toISOString()
+        : null,
       checkin_at: v.reserva.res_checkin_en?.toISOString() ?? null,
     };
   }
@@ -532,6 +546,11 @@ export class AtraccionesService {
         if (err instanceof ReservaUsadaError) {
           throw new ConflictException(
             "No se puede cancelar una reserva que ya realizó check-in o fue asistida.",
+          );
+        }
+        if (err instanceof CancelacionFueraDePlazoError) {
+          throw new ConflictException(
+            "La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.",
           );
         }
         throw err;

@@ -32,7 +32,11 @@ import {
 import { PaymentService } from "../payment/payment.service";
 import { CodigoMetodoPago, Pago } from "../payment/payment.entities";
 import { RefundService } from "../refund/refund.service";
-import { codigoReembolso } from "./cancelacion.util";
+import {
+  codigoReembolso,
+  dentroDePlazo,
+  limiteCancelacion,
+} from "./cancelacion.util";
 import { Reembolso } from "../refund/refund.entities";
 import { Comprador, InvoicingService } from "../invoicing/invoicing.service";
 import { CodigoEstadoFactura } from "../invoicing/invoicing.entities";
@@ -91,6 +95,13 @@ export class SinCupoError extends Error {
 export class ReservaUsadaError extends Error {
   constructor() {
     super("RESERVA_CON_CHECKIN");
+  }
+}
+
+/** Faltan menos de 24 h para el turno (o ya pasó): no se cancela ni se reembolsa. */
+export class CancelacionFueraDePlazoError extends Error {
+  constructor(readonly limite: Date) {
+    super("CANCELACION_FUERA_DE_PLAZO");
   }
 }
 
@@ -323,7 +334,12 @@ export class ReservasAppService {
    */
   async cancelar(
     vista: VistaReserva,
-    datos: { motivo: string | null; solicitante: string },
+    datos: {
+      motivo: string | null;
+      solicitante: string;
+      // La compensación de la Saga de Booking deshace una compra fallida: no tiene plazo.
+      sinPlazo?: boolean;
+    },
     manager: EntityManager,
   ): Promise<boolean> {
     const { reserva, orden } = vista;
@@ -333,6 +349,14 @@ export class ReservasAppService {
       vista.estado === CodigoEstadoReserva.COMPLETADA
     ) {
       throw new ReservaUsadaError();
+    }
+    if (
+      !datos.sinPlazo &&
+      !dentroDePlazo(vista.turno.fecha, vista.turno.hora)
+    ) {
+      throw new CancelacionFueraDePlazoError(
+        limiteCancelacion(vista.turno.fecha, vista.turno.hora),
+      );
     }
     await this.bookings.actualizar(
       reserva.res_id,

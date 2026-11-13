@@ -113,6 +113,21 @@ export class ReservationResponseDto {
 
   @ApiProperty({ required: false, nullable: true, format: "date-time" })
   checkin_at?: string | null;
+
+  @ApiProperty({
+    required: false,
+    description:
+      "true si está confirmada, sin check-in y faltan al menos 24 h para el turno",
+  })
+  cancelable?: boolean;
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    format: "date-time",
+    description: "Hasta cuándo se puede cancelar con reembolso del 100 %",
+  })
+  cancelable_until?: string | null;
 }
 
 export class CancelReservationRequestDto {

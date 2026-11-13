@@ -68,7 +68,7 @@ export class HealthController {
       service_id: this.nodeId,
       node_id: this.nodeId,
       node_code: this.nodeId,
-      version: "3.6.0",
+      version: "3.7.0",
       database_connected: conectada,
       rabbitmq_connected: rabbit === "UP",
       latency_ms: latencia,

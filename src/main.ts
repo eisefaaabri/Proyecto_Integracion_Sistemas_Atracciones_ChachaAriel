@@ -65,7 +65,7 @@ async function bootstrap() {
           "Gestiona el catálogo de tours, disponibilidad de aforo en tiempo real y transacciones de reserva.\n\n" +
           "Endpoints de reserva exigen la cabecera `Idempotency-Key` (UUID v4) y propagan `X-Correlation-Id`.",
       )
-      .setVersion("3.6.0")
+      .setVersion("3.7.0")
       .addBearerAuth()
       .addApiKey(
         { type: "apiKey", in: "header", name: "X-API-Key" },

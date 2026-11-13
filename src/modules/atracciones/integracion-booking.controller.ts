@@ -101,7 +101,7 @@ export class IntegracionBookingController {
   @ApiOperation({
     summary: "Cancelar una reserva (compensación de la Saga)",
     description:
-      "Reintegra los cupos y emite el reembolso simulado del 100 % (refund y stock_restoration). Después del check-in responde 409. Repetir la llamada devuelve 200 con el mismo estado.",
+      "Reintegra los cupos y emite el reembolso simulado del 100 % (refund y stock_restoration). 409 si ya hizo check-in o faltan menos de 24 h para el turno (la compensación de la Saga, solicitante SAGA_ORCHESTRATOR, no tiene plazo). Repetir la llamada devuelve 200 con el mismo estado.",
   })
   @ApiParam(ID_PARAM)
   @ApiHeader({ name: "Idempotency-Key", required: false })

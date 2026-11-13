@@ -20,13 +20,19 @@ import { PaymentService } from "../payment/payment.service";
 import { CONSUMIDOR_FINAL } from "../billing-profile/billing-profile.service";
 import { DisponibilidadAppService } from "./disponibilidad-app.service";
 import { evento } from "../../common/logging/evento";
-import { detalleReembolso, restitucionStock } from "./cancelacion.util";
+import {
+  dentroDePlazo,
+  detalleReembolso,
+  limiteCancelacion,
+  restitucionStock,
+} from "./cancelacion.util";
 import { ClientesService } from "../clientes/clientes.service";
 import {
   BookingCentralClient,
   ResultadoNotificacion,
 } from "./booking-central.client";
 import {
+  CancelacionFueraDePlazoError,
   ReservaUsadaError,
   ReservasAppService,
   SinCupoError,
@@ -357,10 +363,14 @@ export class IntegracionBookingService {
         if (!vista) throw reservaNoEncontrada(id);
         const solicitante = dto.solicitante ?? SolicitanteCancelacion.CLIENTE;
         const motivo = dto.reason?.trim() || null;
+        // La compensación de la Saga deshace una compra fallida en Booking: sin plazo.
+        const sinPlazo =
+          solicitante === SolicitanteCancelacion.SAGA_ORCHESTRATOR ||
+          /^SAGA_COMPENSATION/i.test(motivo ?? "");
         try {
           const cambio = await this.reservas.cancelar(
             vista,
-            { motivo, solicitante },
+            { motivo, solicitante, sinPlazo },
             manager,
           );
           // Ya estaba cancelada: 200 con el estado actual, sin volver a sumar cupos.
@@ -381,6 +391,19 @@ export class IntegracionBookingService {
               "Cancelación No Permitida",
               "No se puede cancelar una reserva que ya realizó check-in o fue asistida.",
               { reservation_code: vista.reserva.res_codigo },
+            );
+          }
+          if (err instanceof CancelacionFueraDePlazoError) {
+            throw problem(
+              HttpStatus.CONFLICT,
+              "CANCELLATION_WINDOW_CLOSED",
+              "cancelacion-fuera-de-plazo",
+              "Cancelación Fuera de Plazo",
+              "La cancelación y reembolso solo están permitidos con al menos 24 horas de anticipación al horario reservado.",
+              {
+                reservation_code: vista.reserva.res_codigo,
+                cancelable_until: err.limite.toISOString(),
+              },
             );
           }
           throw err;
@@ -907,6 +930,10 @@ export class IntegracionBookingService {
       guia_asignado: reserva.res_checkin_guia ?? "Por asignar",
       punto_encuentro: this.puntoEncuentro(v),
       voucher_qr_payload: this.firmarVoucher(v),
+      cancelable_until: limiteCancelacion(
+        turno.fecha,
+        turno.hora,
+      ).toISOString(),
       ...(reserva.res_checkin_en && {
         hora_checkin: reserva.res_checkin_en.toISOString(),
       }),
@@ -918,7 +945,9 @@ export class IntegracionBookingService {
         self,
         ...(status === "CONFIRMED" && {
           checkin: `${self}/checkin`,
-          cancel: `${self}/cancel`,
+          ...(dentroDePlazo(turno.fecha, turno.hora) && {
+            cancel: `${self}/cancel`,
+          }),
         }),
       },
     };

@@ -3,6 +3,27 @@ import type { VistaReserva } from "./reservas-app.service";
 // Regla oficial con Booking (RDA2): cancelar antes del check-in reembolsa el 100 %
 // (simulado). Por inasistencia parcial no hay devolución.
 
+/** Plazo oficial: la cancelación con reembolso solo vale hasta 24 h antes del turno. */
+export const HORAS_LIMITE_CANCELACION = 24;
+const LIMITE_MS = HORAS_LIMITE_CANCELACION * 3600_000;
+
+/** Inicio del turno en hora de Ecuador (UTC-5, sin horario de verano). */
+export function inicioTurno(fecha: string, hora: string): Date {
+  return new Date(`${fecha}T${hora.slice(0, 5)}:00-05:00`);
+}
+
+export function limiteCancelacion(fecha: string, hora: string): Date {
+  return new Date(inicioTurno(fecha, hora).getTime() - LIMITE_MS);
+}
+
+export function dentroDePlazo(
+  fecha: string,
+  hora: string,
+  ahora = Date.now(),
+): boolean {
+  return ahora <= limiteCancelacion(fecha, hora).getTime();
+}
+
 /** REF-ATR-XXXXXX a partir del código ECT-XXXXXX de la reserva. */
 export function codigoReembolso(resCodigo: string): string {
   return `REF-ATR-${resCodigo.replace(/^ECT-/, "")}`;
